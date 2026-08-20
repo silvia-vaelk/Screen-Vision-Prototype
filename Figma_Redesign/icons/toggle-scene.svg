@@ -1,0 +1,6 @@
+<!-- Top-left toggle button: open Scene / Environment settings. lucide: Image -->
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="16" height="16" rx="2.5" stroke="currentColor" stroke-width="1.8"/>
+  <circle cx="9" cy="9.5" r="1.6" stroke="currentColor" stroke-width="1.6"/>
+  <path d="M5 17 L9.5 12.5 L13 16 L15.5 13.5 L20 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

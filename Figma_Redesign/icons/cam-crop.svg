@@ -1,0 +1,8 @@
+<!-- Camera options popover: crop / focus-frame toggle (right). lucide: ScanSquare / Focus -->
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M4 8 V6.5 A2.5 2.5 0 0 1 6.5 4 H8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M16 4 H17.5 A2.5 2.5 0 0 1 20 6.5 V8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M20 16 V17.5 A2.5 2.5 0 0 1 17.5 20 H16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M8 20 H6.5 A2.5 2.5 0 0 1 4 17.5 V16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  <rect x="9" y="9" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.6"/>
+</svg>

@@ -1,0 +1,5 @@
+<!-- Top-left toggle button: open Layers panel (active = purple bg). lucide: Layers / Copy -->
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="8" y="4" width="12" height="12" rx="2.5" stroke="currentColor" stroke-width="1.8"/>
+  <path d="M16 16 V17.5 A2.5 2.5 0 0 1 13.5 20 H6.5 A2.5 2.5 0 0 1 4 17.5 V10.5 A2.5 2.5 0 0 1 6.5 8 H8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

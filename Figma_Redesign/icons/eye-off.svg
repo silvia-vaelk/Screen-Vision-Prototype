@@ -1,0 +1,7 @@
+<!-- Layers panel: hidden row state (shown red/#E5484D when active). lucide: EyeOff -->
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M6.5 7.2 C4.6 8.4 3.2 10 2.5 12 C4.5 16.5 8 18.5 12 18.5 C13.7 18.5 15.3 18.1 16.7 17.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M9.5 9.6 A3 3 0 0 0 14.3 13.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M19.5 14.5 C20.4 13.7 21 12.9 21.5 12 C19.5 7.5 16 5.5 12 5.5 C11.4 5.5 10.8 5.55 10.2 5.65" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M4 4 L20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+</svg>
