@@ -5668,7 +5668,7 @@ const ViewpointsBar = ({
    MAIN APP
    ═══════════════════════════════════════════════════════════════════════════════ */
 export default function App() {
-  const [fbxModel, setFbxModel] = useState({ name: 'boot.fbx', dataUrl: '/boot.fbx' });
+  const [fbxModel, setFbxModel] = useState(() => ({ name: 'boot.fbx', dataUrl: new URL('./boot.fbx', window.location.href).href }));
   const [fbxKey, setFbxKey] = useState(0); // bumped on each new model load to remount PinSnapper
   const [modelLoaded, setModelLoaded] = useState(false);
   const [loadError, setLoadError] = useState(null);
