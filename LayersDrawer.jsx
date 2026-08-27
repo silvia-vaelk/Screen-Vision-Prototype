@@ -209,6 +209,113 @@ const EyeOpacityBare = ({ hidden, opacity, onToggle, onOpacity, visible, isolate
   );
 };
 
+// ─── Opacity control variant toggle ─────────────────────────────────────────
+// 'inline' = Figma-style inline row control (new default)
+// 'popover' = click % badge → floating slider
+// 'scrub'   = original drag-to-scrub
+const OPACITY_CONTROL = 'inline';
+
+/* ── OpacityPopover — click % badge → floating slider + direct input ─────── */
+const OpacityPopover = ({ nodeId, opacity, onOpacity, visible, hidden, isolated, onToggle, onExitIsolation, open, onOpen, onClose }) => {
+  const [eyeHovered, setEyeHovered] = useState(false);
+  const [inputVal, setInputVal] = useState('');
+  const [inputFocused, setInputFocused] = useState(false);
+  const wrapRef = useRef(null);
+  const badgeRef = useRef(null);
+  const effectivelyHidden = hidden || opacity === 0;
+  const hasCustomOpacity = opacity < 100 && opacity > 0;
+  const showBadge = !open && (hasCustomOpacity || (eyeHovered && !effectivelyHidden && !isolated));
+
+  // Sync inputVal when popover opens or opacity changes externally
+  useEffect(() => { if (!inputFocused) setInputVal(String(opacity)); }, [opacity, open, inputFocused]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (!wrapRef.current?.contains(e.target)) onClose(); };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [open, onClose]);
+
+  const commitInput = () => {
+    const n = parseInt(inputVal, 10);
+    if (!isNaN(n)) onOpacity(Math.min(100, Math.max(0, n)));
+    else setInputVal(String(opacity));
+    setInputFocused(false);
+  };
+
+  const handleEyeClick = (e) => {
+    e.stopPropagation();
+    if (isolated) { onExitIsolation?.(); return; }
+    onToggle();
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      onMouseEnter={() => setEyeHovered(true)}
+      onMouseLeave={() => setEyeHovered(false)}
+      onPointerDown={(e) => e.stopPropagation()}
+      style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0, opacity: visible ? 1 : 0, pointerEvents: visible ? 'auto' : 'none', transition: 'opacity 0.12s' }}
+    >
+      {showBadge && (
+        <button
+          ref={badgeRef}
+          onClick={(e) => { e.stopPropagation(); open ? onClose() : onOpen(); }}
+          style={{ fontSize: '11px', fontWeight: 500, color: open || hasCustomOpacity ? L.text : L.textDim, fontFamily: L.font, minWidth: '26px', textAlign: 'right', cursor: 'pointer', userSelect: 'none', background: 'none', border: 'none', padding: 0, transition: 'color 0.15s' }}
+        >{opacity}%</button>
+      )}
+      <button
+        title={isolated ? 'Exit isolation' : effectivelyHidden ? 'Show' : 'Hide'}
+        onClick={handleEyeClick}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', flexShrink: 0, color: effectivelyHidden ? L.active : eyeHovered ? L.iconHover : L.iconDim, transition: 'color 0.12s', userSelect: 'none' }}
+      >
+        {isolated ? (
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+            <path d="M2.017 10.594C1.903 10.415 1.847 10.325 1.815 10.186 1.791 10.082 1.791 9.918 1.815 9.814 1.847 9.675 1.903 9.585 2.017 9.406 2.955 7.921 5.746 4.167 10 4.167c4.255 0 7.046 3.754 7.984 5.239.114.179.17.269.203.408.024.104.024.268 0 .372-.033.139-.089.229-.203.408C17.046 12.079 14.255 15.833 10 15.833c-4.254 0-7.045-3.754-7.983-5.239z" stroke="currentColor" strokeWidth="1.67" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" stroke="currentColor" strokeWidth="1.67" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        ) : effectivelyHidden ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+
+      {open && createPortal(
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{ position: 'fixed', right: (() => { const r = wrapRef.current?.getBoundingClientRect(); return r ? window.innerWidth - r.right : 12; })(), top: (() => { const r = wrapRef.current?.getBoundingClientRect(); return r ? r.top + r.height / 2 - 20 : 0; })(), background: L.bg, border: `1px solid ${L.border}`, borderRadius: '12px', padding: '10px 12px', zIndex: 300, boxShadow: '0 8px 24px rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', gap: '8px', minWidth: '160px' }}
+        >
+          <button
+            title={isolated ? 'Exit isolation' : effectivelyHidden ? 'Show' : 'Hide'}
+            onClick={(e) => { e.stopPropagation(); if (isolated) { onExitIsolation?.(); } else { onToggle(); } }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', flexShrink: 0, color: effectivelyHidden ? L.active : L.iconDim, transition: 'color 0.12s' }}
+          >
+            {isolated ? (
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                <path d="M2.017 10.594C1.903 10.415 1.847 10.325 1.815 10.186 1.791 10.082 1.791 9.918 1.815 9.814 1.847 9.675 1.903 9.585 2.017 9.406 2.955 7.921 5.746 4.167 10 4.167c4.255 0 7.046 3.754 7.984 5.239.114.179.17.269.203.408.024.104.024.268 0 .372-.033.139-.089.229-.203.408C17.046 12.079 14.255 15.833 10 15.833c-4.254 0-7.045-3.754-7.983-5.239z" stroke="currentColor" strokeWidth="1.67" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" stroke="currentColor" strokeWidth="1.67" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            ) : effectivelyHidden ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+          <input
+            type="range" min={0} max={100} value={opacity}
+            onChange={(e) => onOpacity(Number(e.target.value))}
+            style={{ flex: 1, accentColor: L.active, cursor: 'pointer' }}
+          />
+          <input
+            type="text" inputMode="numeric"
+            value={inputFocused ? inputVal : `${opacity}%`}
+            onFocus={() => { setInputFocused(true); setInputVal(String(opacity)); }}
+            onBlur={commitInput}
+            onChange={(e) => setInputVal(e.target.value.replace(/[^0-9]/g, ''))}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); } e.stopPropagation(); }}
+            style={{ width: '36px', fontSize: '11px', fontWeight: 600, color: L.text, fontFamily: L.font, background: L.divider, border: 'none', borderRadius: '4px', textAlign: 'center', padding: '2px 4px', outline: 'none' }}
+          />
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+};
+
 /* ── Context menu ─────────────────────────────────────────────────────────── */
 const ContextMenu = ({ menu, onClose }) => {
   useEffect(() => {
@@ -243,6 +350,106 @@ const ContextMenu = ({ menu, onClose }) => {
           {item.shortcut && <span style={{ fontSize: '10px', color: L.textDisabled }}>{item.shortcut}</span>}
         </div>
       ))}
+    </div>
+  );
+};
+
+/* ── InlineOpacity — Figma-style inline row slider (click % to open) ─────── */
+const OpacityTrack = ({ opacity, onOpacity, labelRef }) => {
+  const wrapRef = useRef(null);
+  const fillRef = useRef(null);
+  const thumbRef = useRef(null);
+  const liveVal = useRef(opacity);
+
+  // Sync DOM when React re-renders with new opacity value
+  useEffect(() => {
+    liveVal.current = opacity;
+    if (fillRef.current) fillRef.current.style.width = `${opacity}%`;
+    if (thumbRef.current) thumbRef.current.style.left = `calc(${opacity}% - 6px)`;
+    if (labelRef?.current) labelRef.current.textContent = `${opacity}%`;
+  }, [opacity, labelRef]);
+
+  const onTrackDown = (e) => {
+    e.stopPropagation();
+    const compute = (clientX) => {
+      const rect = wrapRef.current.getBoundingClientRect();
+      return Math.round(Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100)));
+    };
+    const updateDOM = (v) => {
+      liveVal.current = v;
+      if (fillRef.current) fillRef.current.style.width = `${v}%`;
+      if (thumbRef.current) thumbRef.current.style.left = `calc(${v}% - 6px)`;
+      if (labelRef?.current) labelRef.current.textContent = `${v}%`;
+    };
+    updateDOM(compute(e.clientX));
+    const onMove = (me) => updateDOM(compute(me.clientX));
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      onOpacity(liveVal.current);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      onPointerDown={onTrackDown}
+      style={{ position: 'relative', width: '48px', height: '20px', display: 'flex', alignItems: 'center', cursor: 'ew-resize', flexShrink: 0, marginRight: '6px' }}
+    >
+      <div style={{ position: 'absolute', left: 0, right: 0, height: '4px', borderRadius: '2px', background: L.divider, overflow: 'hidden' }}>
+        <div ref={fillRef} style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${opacity}%`, background: L.iconHover, borderRadius: '2px' }} />
+      </div>
+      <div ref={thumbRef} style={{ position: 'absolute', left: `calc(${opacity}% - 6px)`, width: '12px', height: '12px', borderRadius: '50%', background: L.iconHover, boxShadow: '0 1px 4px rgba(0,0,0,0.3)', pointerEvents: 'none' }} />
+    </div>
+  );
+};
+
+const InlineOpacity = ({ opacity, onOpacity, onClose }) => {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState('');
+  const inputRef = useRef(null);
+  const containerRef = useRef(null);
+  const labelRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) onClose();
+    };
+    document.addEventListener('pointerdown', handler, true);
+    return () => document.removeEventListener('pointerdown', handler, true);
+  }, [onClose]);
+
+  const commit = () => {
+    const n = parseInt(val, 10);
+    if (!isNaN(n)) onOpacity(Math.min(100, Math.max(0, n)));
+    else setVal(String(opacity));
+    setEditing(false);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      onPointerDown={(e) => e.stopPropagation()}
+      style={{ display: 'flex', alignItems: 'center', gap: '8px', background: L.overlay, borderRadius: '8px', padding: '3px 10px', height: '28px', flexShrink: 0 }}
+    >
+      <OpacityTrack opacity={opacity} onOpacity={onOpacity} labelRef={labelRef} />
+      {editing ? (
+        <input
+          ref={inputRef} type="text" inputMode="numeric" value={val}
+          onChange={(e) => setVal(e.target.value.replace(/[^0-9]/g, ''))}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); e.stopPropagation(); }}
+          style={{ width: '32px', fontSize: '11px', fontWeight: 500, color: L.text, fontFamily: L.font, background: 'transparent', border: 'none', outline: 'none', textAlign: 'right', padding: 0 }}
+        />
+      ) : (
+        <span
+          ref={labelRef}
+          onClick={() => { setVal(String(opacity)); setEditing(true); setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 0); }}
+          style={{ fontSize: '11px', fontWeight: 500, color: L.text, fontFamily: L.font, minWidth: '30px', textAlign: 'right', cursor: 'text', userSelect: 'none' }}
+        >{opacity}%</span>
+      )}
     </div>
   );
 };
@@ -283,6 +490,7 @@ const TreeNode = ({ node, depth, ctx }) => {
   const showChevron = hasChildren || node.type === 'group';
   const open = ctx.expandedIds.has(node.id);
   const [hovered, setHovered] = useState(false);
+  const [showOpacity, setShowOpacity] = useState(false);
   const [nameTooltip, setNameTooltip] = useState(null); // {x, y} when showing
   const nameSpanRef = useRef(null);
   const [renameVal, setRenameVal] = useState(node.name);
@@ -311,11 +519,12 @@ const TreeNode = ({ node, depth, ctx }) => {
     ctx.startRename({ id: null });
   };
 
-  const hidden = ctx.hiddenIds.has(node.id);
+  const hidden = (ctx.opacityMap.get(node.id) ?? 100) === 0;
   const locked = ctx.lockedIds.has(node.id);
   const selected = ctx.selectedId === node.id;
   const opacity = ctx.opacityMap.get(node.id) ?? 100;
   const isolated = ctx.isolatedId === node.id;
+  const effectivelyOff = hidden || opacity === 0;
   const isDragging = ctx.dragId === node.id;
   const showLock = HOVER_ICONS ? (hovered || locked) : true;
   const showEye  = HOVER_ICONS ? (hovered || hidden || opacity < 100 || isolated) : true;
@@ -349,6 +558,7 @@ const TreeNode = ({ node, depth, ctx }) => {
         const dx = Math.abs(me.clientX - startX), dy = Math.abs(me.clientY - startY);
         if (dx < 10 && dy < 10) return; // sticky: needs deliberate pull
         started = true;
+        setShowOpacity(false);
         ctx.startDrag(node, me.clientX, me.clientY, grabOffsetX, grabOffsetY);
       }
       ctx.onDragMove(me.clientX, me.clientY);
@@ -398,7 +608,7 @@ const TreeNode = ({ node, depth, ctx }) => {
         {showChevron && (
           <div
             onPointerDown={(e) => { e.stopPropagation(); ctx.toggleExpanded(node.id); }}
-            style={{ width: '16px', height: '16px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: L.text, cursor: 'pointer' }}
+            style={{ width: '16px', height: '16px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: L.text, cursor: 'pointer', opacity: effectivelyOff ? 0.4 : 1, transition: 'opacity 0.15s' }}
           >
             {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </div>
@@ -428,7 +638,7 @@ const TreeNode = ({ node, depth, ctx }) => {
               onMouseEnter={handleNameMouseEnter}
               onMouseLeave={handleNameMouseLeave}
               onDoubleClick={(e) => { e.stopPropagation(); startRename(); }}
-              style={{ flex: 1, fontSize: '14px', fontWeight: 400, color: L.text, fontFamily: L.font, lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              style={{ flex: 1, fontSize: '14px', fontWeight: 400, color: L.text, fontFamily: L.font, lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: effectivelyOff ? 0.4 : 1, transition: 'opacity 0.15s, color 0.12s' }}
             >{node.name}</span>
             {nameTooltip && createPortal(
               <div style={{ position: 'fixed', left: nameTooltip.x, top: nameTooltip.y, background: 'var(--color-greys-900)', borderRadius: '16px', padding: '8px 12px', fontFamily: L.font, fontSize: '12px', fontWeight: 600, color: '#ffffff', whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 9999, boxShadow: '0 4px 8px rgba(16,24,40,0.1)' }}>
@@ -441,11 +651,49 @@ const TreeNode = ({ node, depth, ctx }) => {
 
         {/* Action icons */}
         <div onPointerDown={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: 'auto' }}>
-          <EyeOpacityBare hidden={hidden} opacity={opacity} visible={showEye} isolated={isolated}
-            onToggle={() => ctx.toggleHidden(node)}
-            onOpacity={(val) => ctx.setOpacity(node, val)}
-            onExitIsolation={() => ctx.toggleIsolate(node)}
-          />
+          {OPACITY_CONTROL === 'inline' ? (
+            <>
+              {showOpacity && !ctx.dragId ? (
+                <InlineOpacity
+                  opacity={opacity}
+                  onOpacity={(val) => ctx.setOpacity(node, val)}
+                  onClose={() => setShowOpacity(false)}
+                />
+              ) : ((hovered || opacity < 100) && !ctx.dragId && !renaming) ? (
+                <span
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => setShowOpacity(true)}
+                  style={{ fontSize: '11px', fontWeight: 500, color: opacity < 100 ? L.text : L.textDim, fontFamily: L.font, cursor: 'pointer', userSelect: 'none', flexShrink: 0 }}
+                >{opacity}%</span>
+              ) : null}
+              {/* Eye — always fixed position, never moves */}
+              <button
+                title={isolated ? 'Exit isolation' : effectivelyOff ? 'Show' : 'Hide'}
+                onClick={() => { if (isolated) ctx.toggleIsolate(node); else ctx.toggleHidden(node); }}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', flexShrink: 0, color: (showOpacity || opacity < 100) ? L.iconHover : effectivelyOff ? L.active : L.iconDim, opacity: (showEye || showOpacity || opacity < 100) ? 1 : 0, pointerEvents: (showEye || showOpacity || opacity < 100) ? 'auto' : 'none', transition: 'color 0.12s, opacity 0.12s' }}
+              >
+                {isolated ? (
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                    <path d="M2.017 10.594C1.903 10.415 1.847 10.325 1.815 10.186 1.791 10.082 1.791 9.918 1.815 9.814 1.847 9.675 1.903 9.585 2.017 9.406 2.955 7.921 5.746 4.167 10 4.167c4.255 0 7.046 3.754 7.984 5.239.114.179.17.269.203.408.024.104.024.268 0 .372-.033.139-.089.229-.203.408C17.046 12.079 14.255 15.833 10 15.833c-4.254 0-7.045-3.754-7.983-5.239z" stroke="currentColor" strokeWidth="1.67" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" stroke="currentColor" strokeWidth="1.67" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                ) : effectivelyOff ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </>
+          ) : OPACITY_CONTROL === 'popover' ? (
+            <OpacityPopover nodeId={node.id} hidden={hidden} opacity={opacity} visible={showEye} isolated={isolated}
+              open={ctx.opacityPopoverId === node.id}
+              onOpen={() => ctx.setOpacityPopoverId(node.id)}
+              onClose={() => ctx.setOpacityPopoverId(null)}
+              onToggle={() => ctx.toggleHidden(node)}
+              onOpacity={(val) => ctx.setOpacity(node, val)}
+              onExitIsolation={() => ctx.toggleIsolate(node)} />
+          ) : (
+            <EyeOpacityBare hidden={hidden} opacity={opacity} visible={showEye} isolated={isolated}
+              onToggle={() => ctx.toggleHidden(node)}
+              onOpacity={(val) => ctx.setOpacity(node, val)}
+              onExitIsolation={() => ctx.toggleIsolate(node)} />
+          )}
           <BareIcon active={locked} visible={showLock} title={locked ? 'Unlock' : 'Lock'} onClick={() => ctx.toggleLock(node)}>
             {locked ? <Lock size={16} /> : <Unlock size={16} />}
           </BareIcon>
@@ -476,9 +724,10 @@ const LayersDrawer = ({ meshesRef, open: openProp, onOpenChange, panelTop = '120
 
   const [displayTree, setDisplayTree] = useState(() => buildTree(meshesRef.current || []));
   const [expandedIds, setExpandedIds] = useState(() => new Set(['root']));
-  const [hiddenIds, setHiddenIds] = useState(() => new Set());
+  const prevOpacityRef = useRef(new Map()); // stores last non-zero opacity per node for eye-toggle restore
   const [lockedIds, setLockedIds] = useState(() => new Set());
   const [opacityMap, setOpacityMap] = useState(() => new Map());
+  const [opacityPopoverId, setOpacityPopoverId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [locatedId, setLocatedId] = useState(null);
   const [isolatedId, setIsolatedId] = useState(null);
@@ -644,45 +893,48 @@ const LayersDrawer = ({ meshesRef, open: openProp, onOpenChange, panelTop = '120
   }, []); // stable — reads from ref, no stale closure
 
   /* ── Visibility / lock / opacity ────────────────────────────────────────── */
+  const applyOpacityToMesh = useCallback((node, val) => {
+    if (!node.obj) return;
+    const fraction = val / 100;
+    node.obj.traverse?.((o) => {
+      o.visible = fraction > 0;
+      if (o.material) { o.material.transparent = fraction < 1; o.material.opacity = fraction; o.material.needsUpdate = true; }
+    });
+  }, []);
+
   const toggleHidden = useCallback((node) => {
-    setHiddenIds(prev => {
-      const next = new Set(prev);
-      const willHide = !next.has(node.id);
-      if (willHide) {
-        next.add(node.id);
-        if (node.obj) { node.obj.visible = false; node.obj.traverse?.((o) => { o.visible = false; }); }
+    setOpacityMap(prev => {
+      const current = prev.get(node.id) ?? 100;
+      const isHidden = current === 0;
+      const next = new Map(prev);
+      if (isHidden) {
+        // Restore: use saved previous or 100
+        const restored = prevOpacityRef.current.get(node.id) || 100;
+        next.set(node.id, restored);
+        applyOpacityToMesh(node, restored);
       } else {
-        next.delete(node.id);
-        if (node.obj) {
-          node.obj.visible = true;
-          node.obj.traverse?.((o) => {
-            o.visible = true;
-            if (o.material) { o.material.transparent = false; o.material.opacity = 1; o.material.needsUpdate = true; }
-          });
-        }
-        setOpacityMap(om => { const m = new Map(om); m.set(node.id, 100); return m; });
+        // Hide: save current, set to 0
+        prevOpacityRef.current.set(node.id, current);
+        next.set(node.id, 0);
+        applyOpacityToMesh(node, 0);
       }
       return next;
     });
-  }, []);
+  }, [applyOpacityToMesh]);
 
   const toggleLock = useCallback((node) => {
     setLockedIds(prev => { const next = new Set(prev); if (next.has(node.id)) next.delete(node.id); else next.add(node.id); return next; });
   }, []);
 
   const setOpacity = useCallback((node, val) => {
+    if (val > 0) prevOpacityRef.current.set(node.id, val);
     setOpacityMap(prev => {
       const next = new Map(prev);
       next.set(node.id, val);
-      if (node.obj) {
-        const fraction = val / 100;
-        node.obj.traverse?.((o) => {
-          if (o.material) { o.material.transparent = fraction < 1; o.material.opacity = fraction; o.material.needsUpdate = true; }
-        });
-      }
+      applyOpacityToMesh(node, val);
       return next;
     });
-  }, []);
+  }, [applyOpacityToMesh]);
 
   const toggleIsolate = useCallback((node) => {
     setIsolatedId(prev => {
@@ -692,12 +944,15 @@ const LayersDrawer = ({ meshesRef, open: openProp, onOpenChange, panelTop = '120
       if (turningOn) {
         meshes.forEach(m => { m.visible = false; });
         if (node.obj) { node.obj.visible = true; node.obj.traverse?.((o) => { o.visible = true; }); }
-        setHiddenIds(hPrev => {
-          if (!hPrev.has(node.id)) return hPrev;
-          const s = new Set(hPrev); s.delete(node.id);
-          setOpacityMap(om => { const m = new Map(om); m.set(node.id, 100); return m; });
-          if (node.obj) node.obj.traverse?.((o) => { if (o.material) { o.material.transparent = false; o.material.opacity = 1; o.material.needsUpdate = true; } });
-          return s;
+        // If this node was at 0 opacity, restore it
+        setOpacityMap(om => {
+          const cur = om.get(node.id) ?? 100;
+          if (cur === 0) {
+            const restored = prevOpacityRef.current.get(node.id) || 100;
+            applyOpacityToMesh(node, restored);
+            const m = new Map(om); m.set(node.id, restored); return m;
+          }
+          return om;
         });
       } else {
         meshes.forEach(m => { m.visible = true; });
@@ -724,12 +979,13 @@ const LayersDrawer = ({ meshesRef, open: openProp, onOpenChange, panelTop = '120
   const startRename = useCallback((node) => setRenamingId(node.id), []);
 
   const ctx = useMemo(() => ({
-    hiddenIds, lockedIds, opacityMap, selectedId, locatedId, isolatedId, renamingId,
+    lockedIds, opacityMap, selectedId, locatedId, isolatedId, renamingId,
     expandedIds, dragId, dropTarget,
+    opacityPopoverId, setOpacityPopoverId,
     setSelectedId, toggleHidden, toggleLock, setOpacity, toggleIsolate, duplicate, deleteNode,
     openMenu, startRename, toggleExpanded, startDrag, onDragMove, onDragEnd,
     parentId: 'root', siblingIndex: 0,
-  }), [hiddenIds, lockedIds, opacityMap, selectedId, locatedId, isolatedId, renamingId, expandedIds, dragId, dropTarget, toggleHidden, toggleLock, setOpacity, toggleIsolate, duplicate, deleteNode, openMenu, startRename, toggleExpanded, startDrag, onDragMove, onDragEnd]);
+  }), [lockedIds, opacityMap, selectedId, locatedId, isolatedId, renamingId, expandedIds, dragId, dropTarget, opacityPopoverId, setOpacityPopoverId, toggleHidden, toggleLock, setOpacity, toggleIsolate, duplicate, deleteNode, openMenu, startRename, toggleExpanded, startDrag, onDragMove, onDragEnd]);
 
   /* ── Drag-to-move panel ─────────────────────────────────────────────────── */
   const [dragging, setDragging] = useState(false);
