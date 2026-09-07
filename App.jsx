@@ -1046,16 +1046,15 @@ const BoxSelect = ({ active, selectedUuids, setSelectedUuids, setMarquee }) => {
       return hits.length ? hits[0].object.uuid : null;
     };
 
-    let startX = 0, startY = 0, dragging = false;
+    let startX = 0, startY = 0, dragging = false, didMarquee = false;
     const onDown = (e) => {
-      if (e.button !== 0) return; // only the left button box-selects
-      if (gizmoBusyRef.current) return; // clicking the move gumball — don't box-select
-      startX = e.clientX; startY = e.clientY; dragging = true;
-      setMarquee({ x0: startX, y0: startY, x1: startX, y1: startY });
+      if (e.button !== 0) return;
+      if (gizmoBusyRef.current) return;
+      startX = e.clientX; startY = e.clientY; dragging = true; didMarquee = false;
     };
     const onMove = (e) => {
       if (!dragging) return;
-      setMarquee({ x0: startX, y0: startY, x1: e.clientX, y1: e.clientY });
+      // Don't show marquee — left drag is now orbit (OrbitControls owns it).
     };
     const onUp = (e) => {
       if (!dragging) return;
@@ -5692,9 +5691,9 @@ export default function App() {
   const redlineMode = annotationMode && activeTool === 'pencil';
   const penMode = annotationMode && activeTool === 'pen';
   const reviewMode = annotationMode; // reviewMode = annotationMode for legacy Canvas code
-  const [redlineColor, setRedlineColor] = useState(UI.text);
-  const [penColor, setPenColor] = useState(UI.text);     // pen colour — independent of pencil
-  const [pencilColor, setPencilColor] = useState(UI.text); // pencil colour — independent of pen
+  const [redlineColor, setRedlineColor] = useState('#e5484d');
+  const [penColor, setPenColor] = useState('#e5484d');     // pen colour — independent of pencil
+  const [pencilColor, setPencilColor] = useState('#e5484d'); // pencil colour — independent of pen
   const [redlineWidth, setRedlineWidth] = useState(1.0);
   const [strokeOpacity, setStrokeOpacity] = useState(1); // 0..1, pen/pencil contextual opacity slider
   const [commentMode, setCommentMode] = useState('default'); // 'default' (bubble) | 'callout' (leader line) — Comment is the default tool
@@ -6237,8 +6236,7 @@ export default function App() {
       setShiftHeld(held);          // drives OrbitControls mouseButtons/zoomSpeed props
       const c = orbitRef.current;
       if (c) {
-        c.mouseButtons.RIGHT = held ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
-        c.zoomSpeed = held ? 0.45 : 1.0;  // modifier = zoom more slowly
+        c.zoomSpeed = held ? 0.45 : 1.0;  // Shift = slower zoom
       }
       // Immediate cursor feedback on key press (don't wait for a pointermove).
       const cvs = threeStateRef.current?.gl?.domElement;
@@ -6399,6 +6397,9 @@ export default function App() {
     setActionHistory(h => [...h, { type: 'redline', id: stroke.id }]);
     setStrokeCounter(n => n + 1);
     setPenAnchors([]);
+    // Switch to select tool after committing a path
+    setAnnotationMode(false);
+    setCameraTool(false);
   }, []);
 
   const handlePostSketchSave = useCallback(({ title, note } = {}) => {
@@ -6756,14 +6757,14 @@ export default function App() {
           penVariant={(activeTool === 'pen' || activeTool === 'pencil') ? activeTool : (lastDrawToolRef.current || 'pen')}
           commentVariant={commentMode}
           cameraVariant={cameraVariant}
-          onSelectNavigation={null}
-          onSelectDirectSelect={null}
-          onSelectLaser={null}
-          onSelectDrawing={null}
-          onSelectPen={null}
-          onSelectPencil={null}
-          onSelectComment={null}
-          onSelectCamera={null}
+          onSelectNavigation={() => { setAnnotationMode(false); setCameraTool(false); setActiveMode('navigation'); }}
+          onSelectDirectSelect={() => { setAnnotationMode(false); setCameraTool(false); }}
+          onSelectLaser={() => { setAnnotationMode(false); setCameraTool(false); setActiveMode('laser'); }}
+          onSelectDrawing={selectDrawing}
+          onSelectPen={selectPen}
+          onSelectPencil={selectPencil}
+          onSelectComment={() => { setAnnotationMode(true); setActiveTool('comment'); }}
+          onSelectCamera={() => { setAnnotationMode(false); setCameraTool(true); }}
           onSelectSection={null}
           penColor={penColor} setPenColor={setPenColor}
           pencilColor={pencilColor} setPencilColor={setPencilColor}
@@ -7090,11 +7091,10 @@ export default function App() {
           maxPolarAngle={Math.PI}
           autoRotate={autoRotate}
           autoRotateSpeed={scene.autoRotateSpeed}
-          // Right-drag orbits the camera. Left/middle are handled by the app:
-          // left = box-select / annotation input, middle = context menu.
-          // Holding Shift OR Space swaps RIGHT to PAN (driven by `shiftHeld` so a
-          // re-render can't reset it back to ROTATE mid-hold).
-          mouseButtons={{ LEFT: null, MIDDLE: null, RIGHT: shiftHeld ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE }}
+          // Web-standard nav: left drag = rotate, right drag = pan, scroll = zoom.
+          // In annotation/pen/comment modes left drag is consumed by those tools, so
+          // we null LEFT for OrbitControls there to avoid conflict.
+          mouseButtons={{ LEFT: annotationMode ? null : THREE.MOUSE.ROTATE, MIDDLE: null, RIGHT: THREE.MOUSE.PAN }}
           onChange={() => { if (!viewpointFlyRef.current) setAtViewpoint(false); }}
         />
 
