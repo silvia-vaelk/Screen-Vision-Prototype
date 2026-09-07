@@ -4368,24 +4368,22 @@ const PenPreview3D = ({ anchors, modelPosition, color, width }) => {
   }, [anchors, mp]);
 
   if (!anchors || anchors.length === 0) return null;
-  // Thinner, more elegant preview line. Round caps/joins on the dash segments
-  // (lineCap/lineJoin 'round') give the dashed line its rounded corners.
-  const lineW = Math.max(1.1, (width || 1) * 1.3);
 
-  const BLUE = '#2B3FE0';
-  const SQ = 0.018;   // anchor square outer size
-  const SQI = 0.011;  // anchor square inner (hollow cutout)
-  const HDL = 0.006;  // handle dot radius
+  // Exact values from Figma node 33:3834
+  const BLUE = '#1F4AF1';
+  const SQ = 0.018;   // 9px anchor square (outer)
+  const SQI = 0.011;  // inner cutout for hollow effect
+  const HDL = 0.005;  // ~5px handle dot radius
 
   return (
     <>
-      {/* Blue path guide */}
+      {/* Red stroke — 5px in Figma, drawn first (behind) */}
       {previewPoints.length >= 2 && (
-        <Line points={previewPoints} color={BLUE} lineWidth={lineW} opacity={0.9} transparent />
+        <Line points={previewPoints} color={color} lineWidth={5.0} opacity={0.85} transparent />
       )}
-      {/* Red stroke preview on top */}
+      {/* Blue path guide — 1px in Figma, drawn on top of red */}
       {previewPoints.length >= 2 && (
-        <Line points={previewPoints} color={color} lineWidth={Math.max(0.8, lineW * 0.55)} opacity={0.85} transparent />
+        <Line points={previewPoints} color={BLUE} lineWidth={1.0} opacity={0.9} transparent />
       )}
       {/* Anchors + handles */}
       {anchors.map((anchor, i) => {
@@ -4411,7 +4409,7 @@ const PenPreview3D = ({ anchors, modelPosition, color, width }) => {
               const hw = toWorld(anchor.h1);
               return (
                 <>
-                  <Line points={[hw, wPos]} color={BLUE} lineWidth={0.8} opacity={0.6} transparent />
+                  <Line points={[hw, wPos]} color={BLUE} lineWidth={1.0} opacity={0.7} transparent />
                   <mesh position={hw}><sphereGeometry args={[HDL, 12, 12]} /><meshBasicMaterial color={BLUE} depthTest={false} /></mesh>
                 </>
               );
