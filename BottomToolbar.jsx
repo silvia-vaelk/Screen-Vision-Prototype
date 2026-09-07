@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   MousePointer2, PenTool, Pencil, MessageSquare, Camera,
-  Undo2, Redo2, ChevronDown, Check,
+  Undo2, Redo2, ChevronDown, ChevronUp, Check,
 } from 'lucide-react';
 import { DS } from './tokens.js';
 
@@ -16,11 +16,11 @@ import { DS } from './tokens.js';
 
 // Swatch palette — black default maps to the existing #1C1C1E pen/pencil/redline
 // default; green uses the verified Brand/Mint token.
-const PALETTE = [
+export const PALETTE = [
   { id: 'black',  value: '#1C1C1E' },
   { id: 'red',    value: '#EE6B5E' },
   { id: 'amber',  value: '#F6A831' },
-  { id: 'green',  value: DS.green },
+  { id: 'mint',   value: '#92F5B5' },
   { id: 'purple', value: '#8470F0' },
 ];
 
@@ -70,6 +70,67 @@ const EyeGlyph = ({ off = false }) => off ? (
 
 const ICON = 22;
 
+export const ThicknessControl = ({ value, onChange, variant = 'dark' }) => {
+  const w = value ?? 1;
+  const [local, setLocal] = useState(w.toFixed(1));
+  const focusedRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusedRef.current) setLocal(w.toFixed(1));
+  }, [w]);
+
+  const inc = () => onChange(Math.round((w + 0.1) * 10) / 10);
+  const dec = () => onChange(Math.max(0.1, Math.round((w - 0.1) * 10) / 10));
+
+  const themed = variant === 'themed';
+  const bg       = themed ? 'var(--color-background-subtle-default)'  : '#504F56';
+  const textCol  = themed ? 'var(--color-text-default)'                : '#fff';
+  const btnHover = themed ? 'var(--color-background-subtle-hovered)'  : 'rgba(255,255,255,0.12)';
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'stretch',
+      background: bg, borderRadius: '8px', overflow: 'hidden',
+      height: themed ? '32px' : '40px',
+      padding: themed ? '4px' : '0',
+      flexShrink: 0,
+    }}>
+      <div style={{ display: 'flex', flexDirection: 'column', width: themed ? '18px' : '25px', flexShrink: 0 }}>
+        <button onClick={inc}
+          style={{ flex: 1, border: 'none', background: 'transparent', cursor: 'pointer', color: textCol, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, borderRadius: themed ? '3px' : '0' }}
+          onMouseEnter={e => e.currentTarget.style.background = btnHover}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+          <ChevronUp size={themed ? 9 : 12} />
+        </button>
+        <button onClick={dec}
+          style={{ flex: 1, border: 'none', background: 'transparent', cursor: 'pointer', color: textCol, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, borderRadius: themed ? '3px' : '0' }}
+          onMouseEnter={e => e.currentTarget.style.background = btnHover}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+          <ChevronDown size={themed ? 9 : 12} />
+        </button>
+      </div>
+      <input
+        value={local}
+        onFocus={() => { focusedRef.current = true; }}
+        onBlur={() => { focusedRef.current = false; setLocal(w.toFixed(1)); }}
+        onChange={e => {
+          setLocal(e.target.value);
+          const n = parseFloat(e.target.value);
+          if (!isNaN(n) && n > 0) onChange(Math.round(n * 10) / 10);
+        }}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') { e.stopPropagation(); e.currentTarget.blur(); } }}
+        style={{
+          width: themed ? '40px' : '72px',
+          padding: themed ? '0 4px' : '0 8px', border: 'none', background: 'transparent',
+          color: textCol, fontFamily: DS.font,
+          fontSize: themed ? '12px' : '14px',
+          outline: 'none', cursor: 'text',
+        }}
+      />
+    </div>
+  );
+};
+
 export default function BottomToolbar({
   selectActive, penActive, commentActive, cameraActive,
   navVariant = 'navigation', penVariant = 'pen', commentVariant = 'default', cameraVariant = 'camera',
@@ -78,7 +139,8 @@ export default function BottomToolbar({
   onSelectComment, onSelectCamera, onSelectSection,
   penColor, setPenColor, pencilColor, setPencilColor,
   commentColor, setCommentColor,
-  opacity, setOpacity,
+  strokeWidth, setStrokeWidth,
+  penHasActivePath = false,
   onCapture, cropOn, onToggleCrop,
   onUndo, onRedo, canUndo, canRedo,
 }) {
@@ -257,23 +319,15 @@ export default function BottomToolbar({
     >{glyph}</button>
   );
 
-  const penPopover = penActive && !openMenu && popoverShell(
+  const penPopover = penActive && !openMenu && !penHasActivePath && popoverShell(
     <>
       <SwatchRow value={drawColor} onChange={setDrawColor} />
       <div style={{ width: '1px', height: '24px', background: DS.divider, margin: '0 2px' }} />
-      <input
-        className="btb-slider" type="range" min="0" max="100"
-        value={Math.round((opacity ?? 1) * 100)}
-        style={{ ['--fill']: `${Math.round((opacity ?? 1) * 100)}%` }}
-        onChange={(e) => setOpacity(Number(e.target.value) / 100)}
-      />
-      <span style={{ color: 'var(--color-text-default)', fontFamily: DS.font, fontWeight: 500, fontSize: '12px', minWidth: '24px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-        {Math.round((opacity ?? 1) * 100)}
-      </span>
+      <ThicknessControl value={strokeWidth} onChange={setStrokeWidth} variant="themed" />
     </>
   );
 
-  const commentPopover = commentActive && !openMenu && popoverShell(
+  const commentPopover = commentActive && commentVariant !== 'callout' && !openMenu && popoverShell(
     <SwatchRow value={commentColor} onChange={setCommentColor} />
   );
 

@@ -4,9 +4,9 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Html, ContactShadows, Line, TransformControls, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { MessageSquare as NotesIcon, PenTool as SketchIcon } from 'lucide-react';
+import { MessageSquare as NotesIcon, PenTool as SketchIcon, Check, X as XIcon, ChevronRight, Eye, EyeOff } from 'lucide-react';
 import LayersDrawer from './LayersDrawer.jsx';
-import BottomToolbar from './BottomToolbar.jsx';
+import BottomToolbar, { PALETTE as BTB_PALETTE, ThicknessControl } from './BottomToolbar.jsx';
 import { DS } from './tokens.js';
 import ViewpointCube from './ViewpointCube.jsx';
 import ViewpointCubeV2 from './ViewpointCubeV2.jsx';
@@ -99,24 +99,9 @@ const CURSOR_COMMENT_IDLE = svgDataCursor(
   '<circle cx="16" cy="16" r="11" fill="none" stroke="#6c5ce7" stroke-width="1.5"/><rect x="15" y="12" width="2" height="8" fill="#6c5ce7"/><rect x="12" y="15" width="8" height="2" fill="#6c5ce7"/>',
   16, 16,
 );
-/* Orbit / pan: neutral black, DCC-style. Rotate = two curved arrows forming a
-   circular loop (the universal "rotate" glyph); pan = four-way move. White halo
-   under each so they stay legible over light model surfaces and the floor. */
-const CURSOR_ORBIT_ROTATE = svgDataCursor(
-  // white halo (drawn first, underneath)
-  '<g fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" opacity="0.95"><path d="M8.5 11.5 A9 9 0 0 1 23.5 11.5"/><path d="M23.5 20.5 A9 9 0 0 1 8.5 20.5"/></g>' +
-  '<path d="M21 10 L26 12 L23 16 Z" fill="none" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>' +
-  '<path d="M11 22 L6 20 L9 16 Z" fill="none" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>' +
-  // black glyph on top
-  '<g fill="none" stroke="#171717" stroke-width="2.2" stroke-linecap="round"><path d="M8.5 11.5 A9 9 0 0 1 23.5 11.5"/><path d="M23.5 20.5 A9 9 0 0 1 8.5 20.5"/></g>' +
-  '<path d="M21 10 L26 12 L23 16 Z" fill="#171717"/>' +
-  '<path d="M11 22 L6 20 L9 16 Z" fill="#171717"/>',
-  16, 16,
-);
-const CURSOR_ORBIT_PAN = svgDataCursor(
-  '<path d="M16 4.5l-2.8 4h5.6L16 4.5zM16 27.5l2.8-4h-5.6l2.8 4zM4.5 16l4 2.8v-5.6l-4 2.8zM27.5 16l-4-2.8v5.6l4-2.8z" fill="#171717"/><line x1="16" y1="9" x2="16" y2="23" stroke="#171717" stroke-width="1.5" stroke-linecap="round"/><line x1="9" y1="16" x2="23" y2="16" stroke="#171717" stroke-width="1.5" stroke-linecap="round"/>',
-  16, 16,
-);
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
+const CURSOR_ORBIT_ROTATE = `url("${BASE}/cursors/cursor-rotate.svg") 7 6, default`;
+const CURSOR_ORBIT_PAN    = `url("${BASE}/cursors/cursor-grab.svg") 12 12, grab`;
 /* Pan modifier (Shift OR Space held) — module-level so the in-scene cursor
    components can read it live without prop drilling. Set by App's pan-modifier
    effect; `e.shiftKey` alone is true only for Shift, so cursors check this too. */
@@ -134,34 +119,26 @@ const CURSOR_ANNOTATE_IDLE = svgDataCursor(
   '<path d="M22 4L28 10L30 8L24 2Z" fill="none" stroke="#6c5ce7" stroke-width="1.5" stroke-linejoin="round"/>',
   4, 28,
 );
-/* Pen (Bézier) tool cursors — pen nib shape, filled on surface / outline off */
-const CURSOR_PEN_ON_MODEL = svgDataCursor(
-  '<path d="M21 3L29 11L13 27L4 27L4 20Z" fill="#6c5ce7" stroke="#4a3abd" stroke-width="0.5" stroke-linejoin="round"/>' +
-  '<path d="M4 27L4 20L7 25Z" fill="#4a3abd"/>' +
-  '<path d="M21 3L29 11L31 9L23 1Z" fill="#a29bfe"/>' +
-  '<line x1="23" y1="7" x2="9" y2="23" stroke="rgba(255,255,255,0.35)" stroke-width="1.2" stroke-linecap="round"/>' +
-  '<circle cx="4" cy="27" r="2.5" fill="#ffffff" opacity="0.9"/>',
-  4, 27,
-);
-const CURSOR_PEN_IDLE = svgDataCursor(
-  '<path d="M21 3L29 11L13 27L4 27L4 20Z" fill="none" stroke="#6c5ce7" stroke-width="1.5" stroke-linejoin="round"/>' +
-  '<path d="M21 3L29 11L31 9L23 1Z" fill="none" stroke="#6c5ce7" stroke-width="1.5" stroke-linejoin="round"/>' +
-  '<circle cx="4" cy="27" r="2" fill="none" stroke="#6c5ce7" stroke-width="1.5"/>',
-  4, 27,
-);
+/* Pen (Bézier) tool cursors — from Figma design spec */
+const CURSOR_PEN        = `url("${BASE}/cursors/cursor-pen.svg") 2 2, crosshair`;
+const CURSOR_PEN_ADD    = `url("${BASE}/cursors/cursor-pen-add.svg") 2 2, crosshair`;
+const CURSOR_PEN_REMOVE = `url("${BASE}/cursors/cursor-pen-remove.svg") 2 2, crosshair`;
+/* Selection cursors */
+const CURSOR_ARROW          = `url("${BASE}/cursors/cursor-arrow.svg") 3 2, default`;
+const CURSOR_DIRECT_SELECT  = `url("${BASE}/cursors/cursor-direct-select.svg") 3 2, default`;
+/* Aliases kept for any remaining references */
+const CURSOR_PEN_ON_MODEL = CURSOR_PEN;
+const CURSOR_PEN_IDLE     = CURSOR_PEN;
 
-/* Custom file-based tool cursors (assets in /public/icons). Hotspot = tip of each
-   icon: pen nib at top-left (~3,3), pencil point at bottom-left (~3,21), comment
-   bubble tail at bottom-left (~5,21). Unfilled while hovering, filled while
-   drawing/placing (pointer down). */
-const fileCursor = (file, hotX, hotY) => `url("/icons/${file}") ${hotX} ${hotY}, crosshair`;
-const CURSOR_PEN_HOVER     = fileCursor('Pen-unfilled.svg', 3, 3);
-const CURSOR_PEN_DRAW      = fileCursor('Pen-filled.svg', 3, 3);
+/* Legacy file-based cursors (pencil / comment / text still use these) */
+const fileCursor = (file, hotX, hotY) => `url("${BASE}/icons/${file}") ${hotX} ${hotY}, crosshair`;
+const CURSOR_PEN_HOVER     = CURSOR_PEN;
+const CURSOR_PEN_DRAW      = CURSOR_PEN;
 const CURSOR_PENCIL_HOVER  = fileCursor('Pencil-unfilled.svg', 3, 21);
 const CURSOR_PENCIL_DRAW   = fileCursor('Pencil-filled.svg', 3, 21);
 const CURSOR_COMMENT_HOVER = fileCursor('comment_unfilled.svg', 5, 21);
 const CURSOR_COMMENT_PLACE = fileCursor('comment_filled.svg', 5, 21);
-const CURSOR_TEXT = `url("/icons/text_cursor.svg") 12 4, text`;
+const CURSOR_TEXT = `url("${BASE}/icons/text_cursor.svg") 12 4, text`;
 
 const makeEmojiCursor = (emoji) => {
   const size = 40;
@@ -525,12 +502,12 @@ const LeaderLine = ({ surface, elevated, renderAbove, color = UI.purple }) => {
         points={[surface, elevated]}
         color={color}
         lineWidth={1.5}
-        opacity={0.45}
+        opacity={0.8}
         transparent
       />
       <mesh ref={dotRef} position={surface} userData={{ isPinDot: true }}>
-        <sphereGeometry args={[0.018, 10, 10]} />
-        <meshBasicMaterial color={color} transparent opacity={0.5} />
+        <sphereGeometry args={[0.010, 10, 10]} />
+        <meshBasicMaterial color={color} transparent opacity={0.9} />
       </mesh>
     </>
   );
@@ -578,7 +555,7 @@ const ClickMarker = ({ point, nextNumber, commentMode = 'callout', color = UI.pu
           width: '28px', height: '28px', borderRadius: '50%', background: color,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           transform: 'translate(-50%, -50%)',
-          boxShadow: `0 2px 12px ${UI.purpleDim}, 0 0 0 2.5px #ffffff`,
+          boxShadow: `0 2px 12px rgba(0,0,0,0.3), 0 0 0 2.5px #ffffff`,
           color: DS.white, fontSize: '13px', fontWeight: 400, fontFamily: 'system-ui, sans-serif',
         }}>
           {nextNumber ?? '?'}
@@ -627,7 +604,196 @@ function projectToSurface(clientX, clientY, camera, gl) {
    Both the badge and the surface anchor dot are grab-able:
      • Badge drag  → moves the label freely in 3D (camera-facing plane)
      • Surface drag → slides the surface anchor along the shoe mesh              */
-const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, expandedId, onSetExpanded, onPinViewed, onUpdatePin, seen = true }) => {
+const CalloutBadge = ({ t, badgeDivRef, onPointerDown, isSelected, pinIconOpen, pinColor, seen, hasCam, editMode, isExpanded, highlighted, onUpdate, onCollapse }) => {
+  const [hovered, setHovered] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const paletteRef = useRef(null);
+  const panelRef = useRef(null);
+  const showLabel = (hovered || highlighted) && !!(t.label);
+
+  // When panel closes, reset edit states
+  useEffect(() => { if (!isExpanded) { setEditingLabel(false); setEditingDesc(false); setPaletteOpen(false); } }, [isExpanded]);
+
+  // Close panel on click outside
+  useEffect(() => {
+    if (!isExpanded) return;
+    const close = (e) => {
+      if (panelRef.current && !panelRef.current.contains(e.target) &&
+          badgeDivRef.current && !badgeDivRef.current.contains(e.target)) {
+        onCollapse?.();
+      }
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [isExpanded, onCollapse]);
+
+  // Close palette on click outside
+  useEffect(() => {
+    if (!paletteOpen) return;
+    const close = (e) => { if (paletteRef.current && !paletteRef.current.contains(e.target)) setPaletteOpen(false); };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [paletteOpen]);
+
+  // Token map — same as LayersDrawer L tokens
+  const P = {
+    bg:      'var(--color-surface-content-default)',
+    border:  'var(--color-border-default)',
+    divider: 'var(--color-overlay-divider)',
+    text:    'var(--color-text-default)',
+    textDim: 'var(--color-text-subtle)',
+    font:    "'Inter', sans-serif",
+  };
+
+  const inputBase = { background: 'transparent', border: 'none', outline: 'none', fontFamily: P.font, color: P.text, width: '100%', boxSizing: 'border-box', padding: 0 };
+
+  return (
+    <div
+      ref={badgeDivRef}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ position: 'relative', pointerEvents: 'auto', width: '28px', height: '28px' }}
+    >
+      {/* Badge circle — always draggable */}
+      <div
+        onPointerDown={onPointerDown}
+        style={{
+          width: '28px', height: '28px', borderRadius: '50%',
+          background: pinColor,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transform: 'translate(-50%, -50%)',
+          cursor: 'grab',
+          color: '#fff', fontSize: '13px', fontWeight: 400, fontFamily: 'system-ui, sans-serif',
+          boxShadow: isExpanded
+            ? `0 4px 20px rgba(0,0,0,0.5), 0 0 0 2.5px #ffffff, 0 0 0 5px ${pinColor}`
+            : !seen
+              ? `0 2px 12px rgba(0,0,0,0.4), 0 0 0 2.5px #ffffff, 0 0 10px 2px rgba(255,255,255,0.6)`
+              : hasCam && !editMode
+                ? `0 2px 12px rgba(0,0,0,0.4), 0 0 0 2px ${pinColor}99`
+                : `0 2px 12px rgba(0,0,0,0.4), 0 0 0 1.5px ${pinColor}55`,
+          transition: 'box-shadow 0.15s ease',
+          position: 'relative', zIndex: 2,
+        }}
+      >
+        {t.sequenceNumber ?? '?'}
+      </div>
+
+      {/* Expanded panel */}
+      {isExpanded && (
+        <div
+          ref={panelRef}
+          onPointerDown={e => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            left: 'calc(50% + 8px)',
+            top: '-14px',
+            width: '240px',
+            background: P.bg,
+            borderRadius: '14px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08)',
+            border: `1px solid ${P.border}`,
+            zIndex: 20,
+            animation: 'calloutFadeIn 0.15s ease',
+            overflow: 'visible',
+          }}
+        >
+          {/* Header: label + colour dot */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px 8px 12px', boxShadow: `0 1px 0 ${P.divider}` }}>
+            {editingLabel ? (
+              <input
+                autoFocus
+                value={t.label || ''}
+                onChange={e => onUpdate?.(t.id, { label: e.target.value })}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); setEditingLabel(false); onCollapse?.(); } if (e.key === 'Escape') setEditingLabel(false); }}
+                onBlur={() => setEditingLabel(false)}
+                style={{ ...inputBase, flex: 1, fontSize: '14px', fontWeight: 600, minWidth: 0 }}
+              />
+            ) : (
+              <span
+                onDoubleClick={() => setEditingLabel(true)}
+                title="Double-click to edit"
+                style={{ flex: 1, fontSize: '14px', fontWeight: 600, color: t.label ? P.text : P.textDim, fontFamily: P.font, lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default', minWidth: 0 }}
+              >
+                {t.label || 'Label…'}
+              </span>
+            )}
+            {/* Colour dot */}
+            <div ref={paletteRef} style={{ position: 'relative', flexShrink: 0 }}>
+              <button
+                onPointerDown={e => e.stopPropagation()}
+                onClick={e => { e.stopPropagation(); setPaletteOpen(v => !v); }}
+                title="Change colour"
+                style={{ width: '14px', height: '14px', borderRadius: '50%', background: pinColor, border: `2px solid ${P.border}`, cursor: 'pointer', padding: 0, display: 'block' }}
+              />
+              {paletteOpen && (
+                <div onPointerDown={e => e.stopPropagation()} style={{
+                  position: 'absolute', bottom: 'calc(100% + 10px)', right: 0,
+                  background: P.bg, border: `1px solid ${P.border}`,
+                  borderRadius: '10px', display: 'flex', gap: '4px',
+                  padding: '6px 8px', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', zIndex: 300,
+                }}>
+                  {CALLOUT_PALETTE.map(c => {
+                    const on = pinColor === c.value;
+                    return (
+                      <button key={c.id}
+                        onPointerDown={e => { e.stopPropagation(); onUpdate?.(t.id, { color: c.value }); setPaletteOpen(false); }}
+                        style={{ width: '22px', height: '22px', borderRadius: '50%', background: c.value, border: on ? '2px solid var(--color-text-default)' : `2px solid ${P.border}`, cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: on ? 'scale(1.1)' : 'scale(1)', transition: 'transform 0.1s' }}>
+                        {on && <Check size={12} color="#fff" strokeWidth={2.6} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+          {/* Description — grows with content */}
+          <div style={{ padding: '8px 12px 10px' }}>
+            {editingDesc ? (
+              <textarea
+                autoFocus
+                value={t.description || ''}
+                onChange={e => onUpdate?.(t.id, { description: e.target.value })}
+                onKeyDown={e => { if (e.key === 'Escape') setEditingDesc(false); }}
+                onBlur={() => setEditingDesc(false)}
+                style={{ ...inputBase, resize: 'none', fontSize: '13px', lineHeight: '1.6', color: P.text, display: 'block', overflow: 'hidden', minHeight: '20px', height: 'auto', fieldSizing: 'content' }}
+              />
+            ) : (
+              <p
+                onDoubleClick={() => setEditingDesc(true)}
+                title="Double-click to edit"
+                style={{ margin: 0, fontSize: '13px', color: t.description ? P.text : P.textDim, fontFamily: P.font, lineHeight: '1.6', cursor: 'default', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+              >
+                {t.description || 'Add a description…'}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Hover label pill */}
+      {!isExpanded && showLabel && (
+        <div style={{
+          position: 'absolute', left: 'calc(50% + 8px)', top: 0,
+          transform: 'translateY(-50%)', height: '28px',
+          display: 'flex', alignItems: 'center',
+          background: P.bg, border: `1px solid ${P.border}`,
+          color: P.text, fontSize: '12px', fontWeight: 400, fontFamily: P.font,
+          padding: '0 12px', borderRadius: '14px',
+          whiteSpace: 'nowrap', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+          pointerEvents: 'none', zIndex: 10,
+          animation: 'calloutFadeIn 0.12s ease',
+        }}>
+          {t.label}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, expandedId, onSetExpanded, onPinViewed, onUpdatePin, seen = true, highlighted = false }) => {
   const { camera, gl } = useThree();
   const lineGroupRef  = useRef();   // Three.js group — set .visible imperatively
   const badgeDivRef   = useRef();   // HTML div for badge  — set style.visibility
@@ -702,8 +868,10 @@ const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, ex
       dragActiveRef.current = false;
       if (!moved) {
         // Treat as click — existing fly-to / expand / select behavior
-        if (editMode) { onSelect(t.id); }
-        else {
+        if (editMode) {
+          onSelect(t.id);
+          if (mode === 'callout') onSetExpanded(isExpanded ? null : t.id);
+        } else {
           onFlyTo(t);
           onSetExpanded(isExpanded ? null : t.id);
           onPinViewed?.(t.id);
@@ -799,41 +967,34 @@ const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, ex
       {/* Badge — visibility driven by unified raycaster above.
           zIndexRange is STATIC — changing it remounts the Html and breaks the anchor. */}
       <Html position={elevated} zIndexRange={[38, 0]} style={{ overflow: 'visible' }}>
-        <div ref={badgeDivRef} style={{ position: 'relative', pointerEvents: 'auto' }}>
-          <div
-            onPointerDown={handleBadgePointerDown}
-            style={{
-              width: '28px', height: '28px', borderRadius: '50%',
-              background: pinColor,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transform: (isSelected || pinIconOpen)
-                ? 'translate(-50%, -50%) scale(1.22)'
-                : 'translate(-50%, -50%) scale(1)',
-              transformOrigin: 'center center',
-              cursor: 'grab',
-              color: DS.white, fontSize: '13px', fontWeight: 400, fontFamily: 'system-ui, sans-serif',
-              boxShadow: (isSelected || pinIconOpen)
-                ? `0 4px 20px rgba(108,92,231,0.45), 0 0 0 2.5px #ffffff, 0 0 0 5px ${UI.purple}`
-                : !seen
-                  // Unseen → bright white halo so it's easy to spot.
-                  ? `0 2px 12px rgba(0,0,0,0.4), 0 0 0 2.5px #ffffff, 0 0 10px 2px rgba(255,255,255,0.6)`
-                  : hasCam && !editMode
-                    ? `0 2px 12px rgba(0,0,0,0.4), 0 0 0 2px ${UI.purpleLight}`
-                    : `0 2px 12px rgba(0,0,0,0.4), 0 0 0 1.5px ${UI.purpleDim}`,
-              transition: 'transform 0.18s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.15s ease',
-              flexShrink: 0, position: 'relative', zIndex: 2,
-            }}
-          >
-            {t.sequenceNumber ?? '?'}
-          </div>
-        </div>
+        <CalloutBadge
+          t={t}
+          badgeDivRef={badgeDivRef}
+          onPointerDown={handleBadgePointerDown}
+          isSelected={isSelected}
+          pinIconOpen={pinIconOpen}
+          pinColor={pinColor}
+          seen={seen}
+          hasCam={hasCam}
+          editMode={editMode}
+          isExpanded={isExpanded}
+          highlighted={highlighted}
+          onUpdate={onUpdatePin}
+          onCollapse={() => onSetExpanded(null)}
+        />
       </Html>
     </>
   );
 };
 
-const TooltipPins = ({ tooltips, selectedId, onSelect, editMode, onFlyTo, expandedId, onSetExpanded, onPinViewed, renderAbove, onUpdatePin, isPinSeen }) => {
-  return tooltips.map((t) => (
+const TooltipPins = ({ tooltips, selectedId, onSelect, editMode, onFlyTo, expandedId, onSetExpanded, onPinViewed, renderAbove, onUpdatePin, isPinSeen, highlightedId }) => {
+  // Render selected/expanded pin last so it appears above others
+  const sorted = [...tooltips].sort((a, b) => {
+    const aTop = a.id === selectedId || a.id === expandedId ? 1 : 0;
+    const bTop = b.id === selectedId || b.id === expandedId ? 1 : 0;
+    return aTop - bTop;
+  });
+  return sorted.map((t) => (
     <PinLeader
       key={t.id} t={t} renderAbove={renderAbove}
       selectedId={selectedId} onSelect={onSelect}
@@ -841,6 +1002,7 @@ const TooltipPins = ({ tooltips, selectedId, onSelect, editMode, onFlyTo, expand
       expandedId={expandedId} onSetExpanded={onSetExpanded}
       onPinViewed={onPinViewed} onUpdatePin={onUpdatePin}
       seen={isPinSeen ? isPinSeen(t.id) : true}
+      highlighted={highlightedId === t.id}
     />
   ));
 };
@@ -849,11 +1011,21 @@ const TooltipPins = ({ tooltips, selectedId, onSelect, editMode, onFlyTo, expand
    COMMENT DETAIL POPUP — draggable popup shown when a pin is clicked
    ═══════════════════════════════════════════════════════════════════════════════ */
 const CommentDetailPopup = ({ tooltip, onClose, onUpdate, currentUser }) => {
-  const [reply, setReply] = useState('');
   const [pos, setPos] = useState({ x: window.innerWidth / 2 - 150, y: 140 });
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0, px: 0, py: 0 });
   const [dragging, setDragging] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const paletteRef = useRef(null);
+  const isCallout = tooltip.commentMode !== 'default';
+  const pinColor = tooltip.color || UI.purple;
+
+  useEffect(() => {
+    if (!paletteOpen) return;
+    const close = (e) => { if (paletteRef.current && !paletteRef.current.contains(e.target)) setPaletteOpen(false); };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [paletteOpen]);
 
   const handleDragStart = (e) => {
     if (e.button !== 0) return;
@@ -871,53 +1043,85 @@ const CommentDetailPopup = ({ tooltip, onClose, onUpdate, currentUser }) => {
     window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
   };
 
-  const handleAddReply = () => {
-    if (!reply.trim()) return;
-    onUpdate(tooltip.id, { description: tooltip.description ? tooltip.description + '\n\n' + reply.trim() : reply.trim() });
-    setReply('');
+  const BDR = '1px solid rgba(255,255,255,0.08)';
+  const inputStyle = {
+    width: '100%', boxSizing: 'border-box', background: 'transparent',
+    border: 'none', outline: 'none', fontFamily: UI.font, color: '#fff',
+    resize: 'none', lineHeight: '1.55',
   };
 
   return (
     <div style={{
       position: 'fixed', left: pos.x, top: pos.y, zIndex: 55,
-      width: '300px', background: UI.glass, border: `1px solid ${UI.glassBorder}`,
-      borderRadius: UI.radius, boxShadow: UI.panelShadow,
-      backdropFilter: UI.glassBlur, WebkitBackdropFilter: UI.glassBlur,
-      fontFamily: UI.font, overflow: 'hidden',
+      width: '300px', background: 'rgba(28,28,32,0.97)',
+      border: '1px solid rgba(255,255,255,0.10)',
+      borderRadius: UI.radius, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
+      backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+      fontFamily: UI.font, overflow: 'visible',
     }}>
-      {/* Drag handle */}
+      {/* Header — drag handle */}
       <div onPointerDown={handleDragStart} style={{
-        padding: '10px 12px', borderBottom: `1px solid ${UI.border}`,
+        padding: '10px 12px', borderBottom: BDR,
         display: 'flex', alignItems: 'center', gap: '8px',
-        cursor: dragging ? 'grabbing' : 'grab', userSelect: 'none', flexShrink: 0,
+        cursor: dragging ? 'grabbing' : 'grab', userSelect: 'none',
       }}>
-        <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: UI.purple, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <span style={{ fontSize: '8px', fontWeight: '700', color: DS.white }}>{tooltip.sequenceNumber || '?'}</span>
+        {/* Badge / colour swatch */}
+        <div ref={paletteRef} style={{ position: 'relative', flexShrink: 0 }}>
+          <div
+            onPointerDown={e => { if (!isCallout) return; e.stopPropagation(); }}
+            onClick={e => { if (!isCallout) return; e.stopPropagation(); setPaletteOpen(v => !v); }}
+            style={{
+              width: '24px', height: '24px', borderRadius: '50%', background: pinColor,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              cursor: isCallout ? 'pointer' : 'default',
+              boxShadow: isCallout ? '0 0 0 1.5px rgba(255,255,255,0.25)' : 'none',
+            }}
+          >
+            <span style={{ fontSize: '9px', fontWeight: '700', color: '#fff' }}>{tooltip.sequenceNumber || '?'}</span>
+          </div>
+          {paletteOpen && (
+            <div onPointerDown={e => e.stopPropagation()} style={{
+              position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%', transform: 'translateX(-50%)',
+              background: '#19181A', borderRadius: '10px', display: 'flex', alignItems: 'center',
+              gap: '4px', padding: '6px 8px', boxShadow: '0 8px 24px rgba(0,0,0,0.45)', zIndex: 300,
+            }}>
+              {CALLOUT_PALETTE.map(c => {
+                const on = pinColor === c.value;
+                return (
+                  <button key={c.id}
+                    onPointerDown={e => { e.stopPropagation(); onUpdate(tooltip.id, { color: c.value }); setPaletteOpen(false); }}
+                    style={{ width: '22px', height: '22px', borderRadius: '50%', background: c.value, border: on ? '2px solid #fff' : '2px solid rgba(255,255,255,0.18)', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: on ? 'scale(1.1)' : 'scale(1)', transition: 'transform 0.1s' }}>
+                    {on && <Check size={12} color="#fff" strokeWidth={2.6} />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
-        <span style={{ flex: 1, fontSize: '12px', fontWeight: '600', color: UI.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tooltip.label}</span>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: UI.textDim, cursor: 'pointer', fontSize: '14px', padding: '2px 4px', borderRadius: '5px', lineHeight: 1, flexShrink: 0 }}
-          onMouseEnter={e => { e.currentTarget.style.color = UI.text; e.currentTarget.style.background = UI.bgRow; }}
-          onMouseLeave={e => { e.currentTarget.style.color = UI.textDim; e.currentTarget.style.background = 'none'; }}>✕</button>
+        {/* Editable label */}
+        <input
+          value={tooltip.label || ''}
+          onChange={e => onUpdate(tooltip.id, { label: e.target.value })}
+          onPointerDown={e => e.stopPropagation()}
+          placeholder="Label…"
+          style={{ ...inputStyle, flex: 1, fontSize: '13px', fontWeight: '600', padding: 0, minWidth: 0 }}
+        />
+        <button onClick={onClose} onPointerDown={e => e.stopPropagation()}
+          style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: '2px', borderRadius: '5px', lineHeight: 1, flexShrink: 0, display: 'flex' }}
+          onMouseEnter={e => e.currentTarget.style.color = '#fff'}
+          onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.4)'}
+        ><XIcon size={16} /></button>
       </div>
-      {/* Comment text */}
-      {tooltip.description && (
-        <div style={{ padding: '12px 14px', fontSize: '12px', color: UI.textMid, lineHeight: '1.65', borderBottom: `1px solid ${UI.border}` }}>
-          {tooltip.description}
-        </div>
-      )}
-      {/* Reply area */}
-      <div style={{ padding: '10px 14px 14px' }}>
-        <textarea value={reply} onChange={e => setReply(e.target.value)} placeholder="Add a reply…" rows={2}
-          style={{ width: '100%', resize: 'none', border: `1px solid ${UI.border}`, borderRadius: '8px', fontFamily: UI.font, fontSize: '12px', color: UI.text, padding: '8px 10px', background: 'rgba(0,0,0,0.02)', outline: 'none', boxSizing: 'border-box', lineHeight: '1.55' }}
-          onFocus={e => e.target.style.borderColor = UI.purple}
-          onBlur={e => e.target.style.borderColor = UI.border} />
-        <button onClick={handleAddReply} disabled={!reply.trim()} style={{
-          marginTop: '8px', width: '100%', background: reply.trim() ? UI.purple : 'rgba(0,0,0,0.06)',
-          border: 'none', borderRadius: '8px', color: reply.trim() ? '#fff' : UI.textDim,
-          fontFamily: UI.font, fontSize: '10px', fontWeight: '700', letterSpacing: '0.14em',
-          textTransform: 'uppercase', padding: '9px 0', cursor: reply.trim() ? 'pointer' : 'default',
-          transition: 'background 0.15s, color 0.15s',
-        }}>Reply</button>
+      {/* Editable description */}
+      <div style={{ padding: '12px 14px' }}>
+        <textarea
+          value={tooltip.description || ''}
+          onChange={e => onUpdate(tooltip.id, { description: e.target.value })}
+          onPointerDown={e => e.stopPropagation()}
+          placeholder="Add a description…"
+          rows={3}
+          style={{ ...inputStyle, fontSize: '13px', padding: 0, color: '#fff' }}
+        />
       </div>
     </div>
   );
@@ -2758,14 +2962,13 @@ const ViewModeCursor = ({ active }) => {
     const canvas = gl.domElement;
     if (!active) { canvas.style.cursor = ''; return undefined; }
     const apply = (e) => {
-      if (e.buttons & 2) { canvas.style.cursor = (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE; return; } // right-drag = orbit
-      if (e.shiftKey || PAN_MOD.active) { canvas.style.cursor = CURSOR_ORBIT_PAN; return; } // modifier held → pan-ready
-      // Left-drag / idle = box-select. Middle is a menu click (no special cursor).
-      canvas.style.cursor = 'crosshair';
+      if (e.buttons & 2) { canvas.style.cursor = (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE; return; }
+      if (e.shiftKey || PAN_MOD.active) { canvas.style.cursor = CURSOR_ORBIT_PAN; return; }
+      canvas.style.cursor = CURSOR_ARROW;
     };
     window.addEventListener('pointermove', apply, { passive: true });
     canvas.addEventListener('pointerenter', apply, { passive: true });
-    canvas.style.cursor = 'crosshair';
+    canvas.style.cursor = CURSOR_ARROW;
     return () => {
       window.removeEventListener('pointermove', apply);
       canvas.removeEventListener('pointerenter', apply);
@@ -2892,9 +3095,8 @@ const SceneBackground = ({ skyColor, bgColor, fogColor, fogNear, fogFar }) => {
    ═══════════════════════════════════════════════════════════════════════════════ */
 /* Single committed stroke — isolated so useEffect can imperatively set depthTest on the
    LineMaterial (drei's <Line> passes extra props to the Line2 Object3D, not its material). */
-const RedlineStrokeItem = ({ stroke, mp, isSelected, renderAbove }) => {
+const RedlineStrokeItem = ({ stroke, mp, renderAbove }) => {
   const mainRef = useRef();
-  const haloRef = useRef();
   const baseWidth = Math.max(1, (stroke.width || 2) * 2.2);
   const points = useMemo(
     () => stroke.points3D.map(p => new THREE.Vector3(p.x + mp[0], p.y + mp[1], p.z + mp[2])),
@@ -2903,29 +3105,26 @@ const RedlineStrokeItem = ({ stroke, mp, isSelected, renderAbove }) => {
 
   useEffect(() => {
     const dt = !renderAbove;
-    if (mainRef.current?.material) { mainRef.current.material.depthTest = dt; mainRef.current.material.needsUpdate = true; }
-    if (haloRef.current?.material) { haloRef.current.material.depthTest = dt; haloRef.current.material.needsUpdate = true; }
-  }, [renderAbove]);
+    if (mainRef.current?.material) {
+      mainRef.current.material.depthTest = dt;
+      mainRef.current.material.needsUpdate = true;
+    }
+  }, [renderAbove, baseWidth]);
 
   return (
-    <>
-      {isSelected && (
-        <Line ref={haloRef} points={points} color="#ffffff" lineWidth={baseWidth * 1.6 * 4} opacity={0.3} transparent />
-      )}
-      <Line
-        ref={mainRef}
-        points={points}
-        color={stroke.color || UI.red}
-        lineWidth={baseWidth * (isSelected ? 1.6 : 1)}
-        opacity={isSelected ? 1 : (stroke.opacity ?? 0.92)}
-        transparent
-      />
-    </>
+    <Line
+      ref={mainRef}
+      points={points}
+      color={stroke.color || UI.red}
+      lineWidth={baseWidth}
+      opacity={stroke.opacity ?? 0.92}
+      transparent
+    />
   );
 };
 
 /* Committed redline strokes rendered as depth-tested 3D lines inside the Canvas */
-const RedlineStrokes3D = ({ redlines, modelPosition, selectedId, hidden, renderAbove }) => {
+const RedlineStrokes3D = ({ redlines, modelPosition, hidden, renderAbove }) => {
   const mp = modelPosition || [0, 0, 0];
   if (hidden) return null;
   return (
@@ -2937,7 +3136,6 @@ const RedlineStrokes3D = ({ redlines, modelPosition, selectedId, hidden, renderA
             key={stroke.id}
             stroke={stroke}
             mp={mp}
-            isSelected={stroke.id === selectedId}
             renderAbove={renderAbove}
           />
         );
@@ -3987,6 +4185,342 @@ const DraggableCommentsPanel = ({ tooltips, onFlyTo, onRemove, isPinSeen, onPinV
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════════
+   CALLOUTS PANEL — Layers-style draggable list of callout pins
+   ═══════════════════════════════════════════════════════════════════════════════ */
+// Shared token map — mirrors LayersDrawer's L object exactly
+const CL = {
+  bg:         'var(--color-surface-content-default)',
+  border:     'var(--color-border-default)',
+  text:       'var(--color-text-default)',
+  textDim:    'var(--color-text-subtle)',
+  iconDim:    'var(--color-icon-subtle)',
+  iconHov:    'var(--color-icon-default)',
+  rowHov:     'var(--color-background-subtle-default)',
+  divider:    'var(--color-overlay-divider)',
+  dragPill:   'var(--color-drag-pill)',
+  dragPillHov:'var(--color-drag-pill-hover)',
+  halo:       'var(--color-panel-halo)',
+  font:       "'Inter', sans-serif",
+};
+
+// PIN COLOUR PALETTE — same as pen/pencil tool
+const CALLOUT_PALETTE = [
+  { id: 'purple', value: '#8470F0' },
+  { id: 'red',    value: '#EE6B5E' },
+  { id: 'amber',  value: '#F6A831' },
+  { id: 'mint',   value: '#92F5B5' },
+  { id: 'black',  value: '#1C1C1E' },
+];
+
+const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColorChange, onSelect, onOpen, onHover, selectedId, onReorder, editMode, panelTop = '120px', allHidden = false, onToggleAllHidden, hiddenIds, onToggleHidden }) => {
+  const callouts = useMemo(() => {
+    const raw = tooltips.filter(t => t.commentMode !== 'default');
+    return [...raw].sort((a, b) => (a.sequenceNumber ?? 999) - (b.sequenceNumber ?? 999));
+  }, [tooltips]);
+
+  const [pos, setPos] = useState(null);
+  const [size, setSize] = useState({ w: 280, h: null });
+  const [dragging, setDragging] = useState(false);
+  const [headerHovered, setHeaderHovered] = useState(false);
+  const [dragRowId, setDragRowId] = useState(null);
+  const [dropAfterId, setDropAfterId] = useState(null);
+
+  const panelRef = useRef(null);
+  const dragPillRef = useRef(null);
+  const listRef = useRef(null);
+
+  useEffect(() => { if (open) { setPos(null); setSize({ w: 280, h: null }); } }, [open]);
+  useEffect(() => { setPos(null); }, [panelTop]);
+
+  const onHeaderMouseDown = useCallback((e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const rect = panelRef.current?.getBoundingClientRect();
+    const startLeft = pos ? pos.left : rect ? rect.left : window.innerWidth - 292;
+    const startTop  = pos ? pos.top  : rect ? rect.top  : parseInt(panelTop, 10);
+    setDragging(true);
+    const onMove = (me) => setPos({ left: startLeft + me.clientX - startX, top: startTop + me.clientY - startY });
+    const onUp   = () => { setDragging(false); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [pos, panelTop]);
+
+  const MAX_W = 500, MIN_W = 220, MIN_H = 120;
+  const makeResizeHandler = useCallback((dirs) => (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const panel = panelRef.current;
+    const startW = size.w, startH = size.h ?? panel.offsetHeight;
+    const startLeft = pos ? pos.left : (panel?.getBoundingClientRect().left ?? window.innerWidth - 292);
+    const onMove = (me) => {
+      const dx = me.clientX - startX, dy = me.clientY - startY;
+      setSize(prev => ({
+        w: dirs.includes('e') ? Math.min(MAX_W, Math.max(MIN_W, startW + dx))
+          : dirs.includes('w') ? Math.min(MAX_W, Math.max(MIN_W, startW - dx))
+          : prev.w,
+        h: dirs.includes('s') ? Math.max(MIN_H, startH + dy) : prev.h,
+      }));
+      if (dirs.includes('w')) setPos(p => ({ left: Math.min(startLeft + dx, startLeft + startW - MIN_W), top: p ? p.top : parseInt(panelTop, 10) }));
+    };
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [size, pos, panelTop]);
+
+  const handleRowPointerDown = useCallback((e, t) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button')) return;
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    let started = false;
+    let currentDropAfterId = null;
+
+    const onMove = (me) => {
+      if (!started) {
+        if (Math.abs(me.clientX - startX) < 8 && Math.abs(me.clientY - startY) < 8) return;
+        started = true;
+        setDragRowId(t.id);
+      }
+      if (!listRef.current) return;
+      const rows = Array.from(listRef.current.querySelectorAll('[data-callout-row]'));
+      let aft = null;
+      for (const row of rows) {
+        if (row.getAttribute('data-callout-row') === t.id) continue;
+        const rect = row.getBoundingClientRect();
+        if (me.clientY > (rect.top + rect.bottom) / 2) aft = row.getAttribute('data-callout-row');
+      }
+      currentDropAfterId = aft;
+      setDropAfterId(aft);
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (started) {
+        const ids = callouts.map(c => c.id).filter(id => id !== t.id);
+        const insertIdx = currentDropAfterId === null ? 0 : ids.indexOf(currentDropAfterId) + 1;
+        ids.splice(insertIdx, 0, t.id);
+        onReorder?.(ids);
+        setDragRowId(null);
+        setDropAfterId(null);
+      } else {
+        onSelect?.(t.id);
+        onFlyTo?.(t);
+        onOpen?.(t.id);
+      }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [callouts, onReorder, onSelect, onFlyTo, onOpen]);
+
+  const isHot = dragging || headerHovered;
+  const left  = pos ? `${pos.left}px` : undefined;
+  const top   = pos ? `${pos.top}px`  : panelTop;
+  const right  = pos ? undefined : '8px';
+
+  return createPortal(
+    <div style={{
+      position: 'fixed', left, top, right, zIndex: 150, userSelect: 'none',
+      transformOrigin: 'top right',
+      transform: open ? 'translateX(0) scale(1)' : 'translateX(12px) scale(0.985)',
+      opacity: open ? 1 : 0,
+      pointerEvents: open ? 'auto' : 'none',
+      background: isHot ? 'var(--color-panel-halo)' : 'transparent',
+      backdropFilter: isHot ? 'blur(8px)' : 'none',
+      WebkitBackdropFilter: isHot ? 'blur(8px)' : 'none',
+      borderRadius: '16px', padding: '4px',
+      transition: 'transform 0.26s cubic-bezier(0.22,1,0.36,1), opacity 0.2s ease, background 0.25s ease',
+    }}>
+      <div ref={panelRef} style={{
+        width: `${size.w}px`,
+        height: size.h ? `${size.h}px` : undefined,
+        maxHeight: size.h ? undefined : 'calc(100vh - 140px)',
+        minWidth: `${MIN_W}px`, minHeight: `${MIN_H}px`, maxWidth: `${MAX_W}px`,
+        background: 'var(--color-surface-content-default)',
+        border: '1px solid var(--color-border-default)',
+        borderRadius: '12px',
+        display: 'flex', flexDirection: 'column',
+        boxSizing: 'border-box', overflow: 'hidden', position: 'relative',
+      }}>
+        {/* Header */}
+        <div
+          onMouseDown={onHeaderMouseDown}
+          onMouseEnter={() => { setHeaderHovered(true); if (dragPillRef.current) dragPillRef.current.style.opacity = '1'; }}
+          onMouseLeave={() => { setHeaderHovered(false); if (dragPillRef.current) dragPillRef.current.style.opacity = '0.5'; }}
+          style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '36px', padding: '0 8px', boxShadow: '0 1px 0 var(--color-overlay-divider)', flexShrink: 0, cursor: 'grab' }}
+        >
+          <span style={{ fontSize: '14px', fontWeight: 400, color: 'var(--color-text-default)', fontFamily: "'Inter', sans-serif", lineHeight: '20px' }}>Callouts</span>
+          <div ref={dragPillRef} style={{ position: 'absolute', left: '50%', top: '8px', transform: 'translateX(-50%)', width: '64px', height: '2px', borderRadius: '1px', background: 'var(--color-drag-pill)', opacity: 0.5, pointerEvents: 'none', transition: 'background 0.2s, opacity 0.2s' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <button onMouseDown={e => e.stopPropagation()} onClick={onToggleAllHidden} title={allHidden ? 'Show all' : 'Hide all'}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px', borderRadius: '6px', border: 'none', background: 'transparent', cursor: 'pointer', color: allHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)', padding: 0 }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
+              onMouseLeave={e => e.currentTarget.style.color = allHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)'}
+            >
+              {allHidden ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+            <button onMouseDown={e => e.stopPropagation()} onClick={() => onOpenChange(false)} title="Close"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px', borderRadius: '6px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-icon-subtle)', padding: 0 }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
+              onMouseLeave={e => e.currentTarget.style.color = 'var(--color-icon-subtle)'}
+            >
+              <XIcon size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* Empty state */}
+        {callouts.length === 0 && (
+          <div style={{ padding: '16px', fontSize: '14px', color: 'var(--color-border-default)', textAlign: 'center', fontFamily: "'Inter', sans-serif" }}>
+            {editMode ? 'Click on the model to add a callout' : 'No callouts placed'}
+          </div>
+        )}
+
+        {/* Rows */}
+        <div ref={listRef} style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+          {callouts.map((t, i) => {
+            const isHidden = allHidden || hiddenIds?.has(t.id);
+            const isSelected = selectedId === t.id;
+            const isDraggingThis = dragRowId === t.id;
+            const showDropAbove = dragRowId && !isDraggingThis && dropAfterId === null && i === 0;
+            const showDropBelow = dragRowId && !isDraggingThis && dropAfterId === t.id;
+            return (
+              <CalloutRow
+                key={t.id} t={t} index={i}
+                isHidden={isHidden} isSelected={isSelected}
+                isDraggingThis={isDraggingThis}
+                showDropAbove={showDropAbove} showDropBelow={showDropBelow}
+                editMode={editMode}
+                onPointerDown={(e) => handleRowPointerDown(e, t)}
+                onRemove={() => onRemove?.(t.id)}
+                onToggleHidden={() => onToggleHidden?.(t.id)}
+                onColorChange={(color) => onColorChange?.(t.id, color)}
+                onOpen={() => { onFlyTo?.(t); onOpen?.(t.id); }}
+                onHoverIn={() => onHover?.(t.id)}
+                onHoverOut={() => onHover?.(null)}
+              />
+            );
+          })}
+        </div>
+
+        {/* Resize handles */}
+        <div onMouseDown={makeResizeHandler(['w'])} style={{ position: 'absolute', top: 0, left: 0, width: '5px', height: '100%', cursor: 'ew-resize' }} />
+        <div onMouseDown={makeResizeHandler(['s'])} style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '5px', cursor: 'ns-resize' }} />
+        <div onMouseDown={makeResizeHandler(['w', 's'])} style={{ position: 'absolute', bottom: 0, left: 0, width: '12px', height: '12px', cursor: 'nesw-resize', display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-start', padding: '3px' }}>
+          <svg width="6" height="6" viewBox="0 0 8 8" fill="none"><path d="M1 1L7 7M1 4L4 7" stroke="var(--color-drag-pill)" strokeWidth="1.5" strokeLinecap="round"/></svg>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
+const CalloutDropGap = () => (
+  <div style={{ height: '44px', background: 'var(--color-overlay-subtle)', flexShrink: 0, pointerEvents: 'none' }} />
+);
+
+const CalloutRow = ({ t, index, isHidden, isSelected, isDraggingThis, showDropAbove, showDropBelow, editMode, onPointerDown, onRemove, onToggleHidden, onColorChange, onOpen, onHoverIn, onHoverOut }) => {
+  const [hovered, setHovered] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const paletteRef = useRef(null);
+
+  useEffect(() => {
+    if (!paletteOpen) return;
+    const close = (e) => { if (paletteRef.current && !paletteRef.current.contains(e.target)) setPaletteOpen(false); };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [paletteOpen]);
+
+  const pinColor = t.color || UI.gold;
+  const effectivelyOff = isHidden;
+  const showEye = hovered || isHidden;
+
+  return (
+    <div>
+      {showDropAbove && <CalloutDropGap />}
+      <div
+        data-callout-row={t.id}
+        onMouseEnter={() => { setHovered(true); onHoverIn?.(); }}
+        onMouseLeave={() => { setHovered(false); onHoverOut?.(); }}
+        onPointerDown={onPointerDown}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '8px',
+          height: '44px', paddingLeft: '16px', paddingRight: '12px',
+          cursor: isDraggingThis ? 'grabbing' : 'grab', boxSizing: 'border-box', width: '100%',
+          background: isDraggingThis ? 'transparent'
+            : isSelected ? 'var(--color-background-subtle-default)'
+            : hovered ? 'var(--color-overlay-subtle)'
+            : 'transparent',
+          transition: 'background 0.1s, opacity 0.18s ease',
+          opacity: isDraggingThis ? 0.28 : 1,
+          userSelect: 'none',
+        }}
+      >
+        {/* Coloured badge circle — matches scene pin */}
+        <div style={{ position: 'relative', flexShrink: 0 }} ref={paletteRef}>
+          <button
+            onPointerDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); setPaletteOpen(v => !v); }}
+            title="Change colour"
+            style={{ width: '22px', height: '22px', borderRadius: '50%', background: pinColor, border: '2px solid rgba(255,255,255,0.25)', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: effectivelyOff ? 0.4 : 1, transition: 'opacity 0.15s', color: '#fff', fontSize: '11px', fontWeight: 400, fontFamily: 'system-ui, sans-serif', boxShadow: '0 1px 4px rgba(0,0,0,0.3)' }}
+          >
+            {t.sequenceNumber ?? index + 1}
+          </button>
+          {paletteOpen && (
+            <div onPointerDown={e => e.stopPropagation()} style={{ position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%', transform: 'translateX(-50%)', background: '#19181A', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 8px', boxShadow: '0 8px 24px rgba(0,0,0,0.35)', zIndex: 300 }}>
+              {CALLOUT_PALETTE.map(c => {
+                const on = pinColor === c.value;
+                return (
+                  <button key={c.id} onPointerDown={e => { e.stopPropagation(); onColorChange?.(c.value); setPaletteOpen(false); }}
+                    style={{ width: '22px', height: '22px', borderRadius: '50%', background: c.value, border: on ? '2px solid #fff' : '2px solid rgba(255,255,255,0.18)', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: on ? 'scale(1.1)' : 'scale(1)', transition: 'transform 0.1s' }}>
+                    {on && <Check size={12} color="#fff" strokeWidth={2.6} />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        {/* Label — clickable to open in scene */}
+        <span
+          title={t.label}
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); onOpen?.(); }}
+          style={{ flex: 1, fontSize: '14px', fontWeight: 400, color: 'var(--color-text-default)', fontFamily: "'Inter', sans-serif", lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: effectivelyOff ? 0.4 : 1, transition: 'opacity 0.15s, color 0.12s', cursor: 'pointer' }}
+          onMouseEnter={e => e.currentTarget.style.color = 'var(--color-text-default)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--color-text-default)'}
+        >
+          {t.label || `Callout ${index + 1}`}
+        </span>
+
+        {/* Actions — fixed right position like LayersDrawer */}
+        <div onPointerDown={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: 'auto' }}>
+          {editMode && (
+            <button onClick={e => { e.stopPropagation(); onRemove?.(); }} title="Delete"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', color: 'var(--color-icon-subtle)', opacity: hovered ? 1 : 0, pointerEvents: hovered ? 'auto' : 'none', transition: 'color 0.12s, opacity 0.12s' }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
+              onMouseLeave={e => e.currentTarget.style.color = 'var(--color-icon-subtle)'}
+            >
+              <XIcon size={16} />
+            </button>
+          )}
+          <button onClick={e => { e.stopPropagation(); onToggleHidden?.(); }} title={isHidden ? 'Show' : 'Hide'}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', color: isHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)', opacity: showEye ? 1 : 0, pointerEvents: showEye ? 'auto' : 'none', transition: 'color 0.12s, opacity 0.12s' }}
+            onMouseEnter={e => { if (!isHidden) e.currentTarget.style.color = 'var(--color-icon-default)'; }}
+            onMouseLeave={e => { if (!isHidden) e.currentTarget.style.color = 'var(--color-icon-subtle)'; }}
+          >
+            {isHidden ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
+      </div>
+      {showDropBelow && <CalloutDropGap />}
+    </div>
+  );
+};
+
+
+
+/* ═══════════════════════════════════════════════════════════════════════════════
    BEZIER PEN HELPER — convert anchor array to points3D
    ═══════════════════════════════════════════════════════════════════════════════ */
 const bezierAnchorsToPoints3D = (anchors, modelPosition) => {
@@ -4105,13 +4639,186 @@ const ANN_COLOR_PNG = {
 
 
 /* ═══════════════════════════════════════════════════════════════════════════════
+   PEN INLINE TOOLBAR — floating color+weight pill near the active path
+   Only shown when editing an existing path (double-click to enter direct-select)
+   ═══════════════════════════════════════════════════════════════════════════════ */
+const PenInlineToolbar = ({ penAnchors, modelPosition, threeStateRef, color, onColorChange, width, onWidthChange }) => {
+  const [autoPos, setAutoPos] = React.useState(null);
+  const [manualPos, setManualPos] = React.useState(null);
+  const [expanded, setExpanded] = React.useState(false);
+  const [hovered, setHovered] = React.useState(false);
+  const [dragging, setDragging] = React.useState(false);
+  const rafRef = useRef(null);
+  const paletteRef = useRef(null);
+
+  // Compute bounding box centroid once when anchors first load
+  useEffect(() => {
+    if (!penAnchors || penAnchors.length === 0) { setAutoPos(null); setManualPos(null); return; }
+    const compute = () => {
+      const st = threeStateRef.current;
+      if (!st) { rafRef.current = requestAnimationFrame(compute); return; }
+      const mp = modelPosition || [0, 0, 0];
+      const rect = st.gl.domElement.getBoundingClientRect();
+      let sumX = 0, sumY = 0, count = 0;
+      for (const a of penAnchors) {
+        const v = new THREE.Vector3(a.pos3D.x + mp[0], a.pos3D.y + mp[1], a.pos3D.z + mp[2]).project(st.camera);
+        if (v.z > 1) continue;
+        sumX += (v.x + 1) / 2 * rect.width + rect.left;
+        sumY += (1 - (v.y + 1) / 2) * rect.height + rect.top;
+        count++;
+      }
+      if (count > 0) setAutoPos({ x: sumX / count, y: sumY / count - 68 });
+    };
+    rafRef.current = requestAnimationFrame(compute);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [penAnchors]);
+
+  // Close palette on outside click — use bubble phase + contains check so swatch
+  // clicks are excluded and onColorChange fires before the palette closes
+  useEffect(() => {
+    if (!expanded) return;
+    const close = (e) => {
+      if (paletteRef.current && paletteRef.current.contains(e.target)) return;
+      setExpanded(false);
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [expanded]);
+
+  if (!autoPos && !manualPos) return null;
+
+  const base = manualPos ?? autoPos;
+  const left = base.x;
+  const top = Math.max(60, base.y);
+
+  // Drag-to-move — same pattern as LayersDrawer
+  const onDragStart = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const startLeft = left, startTop = top;
+    setDragging(true);
+    const onMove = (me) => setManualPos({ x: startLeft + me.clientX - startX, y: startTop + me.clientY - startY });
+    const onUp = () => { setDragging(false); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const isHot = dragging || hovered;
+
+  return (
+    // Outer anchor — fixed position, no hover effect, just positions the stack
+    <div
+      onPointerDown={e => e.stopPropagation()}
+      style={{ position: 'fixed', left, top, transform: 'translateX(-50%)', zIndex: 2000, pointerEvents: 'auto' }}
+    >
+      {/* ── Expanded palette — absolutely above main pill, independent of hover ── */}
+      {expanded && (
+        <div
+          ref={paletteRef}
+          onPointerDown={e => e.stopPropagation()}
+          style={{
+            position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%', transform: 'translateX(-50%)',
+            // Same dark bg as BottomToolbar pen popover — matches "making a new path" styling
+            background: '#19181A',
+            borderRadius: 12,
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '8px 10px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+            pointerEvents: 'auto',
+          }}
+        >
+          {BTB_PALETTE.map(c => {
+            const on = color === c.value;
+            return (
+              <button
+                key={c.id}
+                title={c.id}
+                onPointerDown={e => { e.stopPropagation(); onColorChange(c.value); setExpanded(false); }}
+                style={{
+                  width: 24, height: 24, borderRadius: '50%', background: c.value,
+                  // Same interaction style as BottomToolbar SwatchRow (new path creation)
+                  border: on ? '2px solid #fff' : '2px solid rgba(255,255,255,0.18)',
+                  boxShadow: on ? '0 0 0 2px rgba(255,255,255,0.25)' : 'none',
+                  cursor: 'pointer', padding: 0, flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transform: on ? 'scale(1.06)' : 'scale(1)',
+                  transition: 'transform 0.1s, border 0.1s',
+                }}
+              >
+                {on && <Check size={13} color="#fff" strokeWidth={2.6} />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Main pill — hover halo only here ── */}
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          background: isHot ? 'var(--color-panel-halo)' : 'transparent',
+          backdropFilter: isHot ? 'blur(8px)' : 'none',
+          WebkitBackdropFilter: isHot ? 'blur(8px)' : 'none',
+          borderRadius: 16, padding: 4,
+          transition: 'background 0.25s ease',
+        }}
+      >
+        <div
+          onMouseDown={onDragStart}
+          style={{
+            background: 'var(--color-surface-content-default)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 12,
+            display: 'flex', alignItems: 'center',
+            gap: 8,
+            padding: '4px 4px 4px 6px',
+            whiteSpace: 'nowrap',
+            cursor: dragging ? 'grabbing' : 'grab',
+          }}
+        >
+          {/* Vertical drag indicator — matches Layers panel pill (width/height swapped, same tokens) */}
+          <div style={{
+            width: 2, height: 20, borderRadius: 1, flexShrink: 0,
+            background: 'var(--color-drag-pill)',
+            opacity: isHot ? 1 : 0.5,
+            transition: 'background 0.2s, opacity 0.2s',
+            pointerEvents: 'none',
+          }} />
+
+          {/* Single color swatch — click opens palette above */}
+          <button
+            title="Change colour"
+            onPointerDown={e => { e.stopPropagation(); setExpanded(v => !v); }}
+            style={{
+              width: 24, height: 24, borderRadius: '50%', background: color,
+              border: '2px solid var(--color-overlay-divider)',
+              cursor: 'pointer', padding: 0, flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <Check size={13} color="var(--color-icon-inverse-light)" strokeWidth={2.6} />
+          </button>
+
+          {/* Thickness — themed: token colors, 4px internal padding, narrow */}
+          <ThicknessControl value={width} onChange={onWidthChange} variant="themed" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════════
    PEN TOOL OVERLAY — DOM overlay for Bézier pen anchor placement
    ═══════════════════════════════════════════════════════════════════════════════ */
-const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnchors, setPenAnchors, onPathCommitted, strokeColor, strokeWidth, strokeOpacity = 0.92, strokeCounter, onContextMenu }) => {
+const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnchors, setPenAnchors, onPathCommitted, strokeColor, strokeWidth, strokeOpacity = 0.92, strokeCounter, onContextMenu, directSelect, setDirectSelect, selectedAnchorId, setSelectedAnchorId, onCancelEdit }) => {
   const overlayRef = useRef(null);
   const isDraggingHandleRef = useRef(false);
   const handlePlaneRef = useRef(null);  // THREE.Plane for current anchor's handle drag
   const handleWorldAnchorRef = useRef(null); // world pos of current anchor
+  const draggingAnchorRef = useRef(null); // { id, which: 'pos'|'h1'|'h2' } when dragging existing anchor/handle
   const modelPositionRef = useRef(modelPosition);
   useEffect(() => { modelPositionRef.current = modelPosition; }, [modelPosition]);
   const onContextMenuRef = useRef(onContextMenu);
@@ -4169,10 +4876,12 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
       id: Date.now() + Math.random(), points3D, color: strokeColor, width: strokeWidth,
       visible: true, name: `Pen ${strokeCounter}`, opacity: strokeOpacity, comments: [],
       type: 'sketch-pen', created: Date.now(),
+      anchors: anchors.map(a => ({ ...a })),
     };
     onPathCommitted(stroke);
     setPenAnchors([]);
-  }, [penAnchors, strokeColor, strokeWidth, strokeOpacity, strokeCounter, modelPositionRef, onPathCommitted, setPenAnchors]);
+    setSelectedAnchorId?.(null);
+  }, [penAnchors, strokeColor, strokeWidth, strokeOpacity, strokeCounter, modelPositionRef, onPathCommitted, setPenAnchors, setSelectedAnchorId]);
 
   // Keyboard: Enter = finalize, Escape = cancel
   useEffect(() => {
@@ -4181,11 +4890,12 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea') return;
       if (e.key === 'Enter') { e.preventDefault(); finalizePath(); }
-      if (e.key === 'Escape') { setPenAnchors([]); }
+      if (e.key === 'Escape') { e.preventDefault(); if (directSelect) { finalizePath(); } else { setPenAnchors([]); setSelectedAnchorId?.(null); onCancelEdit?.(); } }
+      if (e.key === 'Backspace' || e.key === 'Delete') { setPenAnchors([]); setSelectedAnchorId?.(null); onCancelEdit?.(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, finalizePath, setPenAnchors]);
+  }, [active, directSelect, finalizePath, setPenAnchors, setSelectedAnchorId, onCancelEdit]);
 
   // Pointer events on overlay div
   useEffect(() => {
@@ -4193,6 +4903,16 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
     if (!overlay || !active) return;
 
     let lastDownTime = 0;
+
+    const screenPos = (localPt) => {
+      const st = threeStateRef.current;
+      if (!st) return null;
+      const mp = modelPositionRef.current;
+      const wp = new THREE.Vector3(localPt.x + mp[0], localPt.y + mp[1], localPt.z + mp[2]);
+      const proj = wp.project(st.camera);
+      const rect = st.gl.domElement.getBoundingClientRect();
+      return { x: rect.left + (proj.x * 0.5 + 0.5) * rect.width, y: rect.top + (-proj.y * 0.5 + 0.5) * rect.height };
+    };
 
     const onDown = (e) => {
       // Middle-click → context menu, opened globally on `auxclick`.
@@ -4214,6 +4934,108 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
         window.addEventListener('pointerup', restore);
         return;
       }
+
+      // Check if clicking near an existing anchor or handle
+      const ANCHOR_HIT = 16, HANDLE_HIT = 12, SEG_HIT = 10;
+      const firstAnchorId = penAnchors[0]?.id;
+      const lastAnchorId = penAnchors[penAnchors.length - 1]?.id;
+
+      // --- Pen mode (not directSelect): anchor click = DELETE, segment click = INSERT ---
+      if (!directSelect && penAnchors.length > 0) {
+        // Check anchor proximity first → remove anchor
+        for (const anchor of penAnchors) {
+          const sp = screenPos(anchor.pos3D);
+          if (sp && Math.hypot(e.clientX - sp.x, e.clientY - sp.y) < ANCHOR_HIT) {
+            if (anchor.id === lastAnchorId) return; // don't delete the active endpoint
+            if (anchor.id === firstAnchorId && penAnchors.length >= 2) {
+              // Reverse path so we can continue from the other end (existing behavior)
+              setPenAnchors(prev => [...prev].reverse().map(a => ({ ...a, h1: a.h2, h2: a.h1 })));
+              return;
+            }
+            // Delete mid-anchor
+            setPenAnchors(prev => prev.filter(a => a.id !== anchor.id));
+            return;
+          }
+        }
+        // Check segment proximity → insert anchor via de Casteljau
+        if (penAnchors.length >= 2) {
+          for (let si = 0; si < penAnchors.length - 1; si++) {
+            const A = penAnchors[si], B = penAnchors[si + 1];
+            const sa = screenPos(A.pos3D), sb = screenPos(B.pos3D);
+            if (!sa || !sb) continue;
+            const dx = sb.x - sa.x, dy = sb.y - sa.y, lenSq = dx * dx + dy * dy;
+            if (lenSq === 0) continue;
+            const t = Math.max(0.01, Math.min(0.99, ((e.clientX - sa.x) * dx + (e.clientY - sa.y) * dy) / lenSq));
+            const closePx = sa.x + t * dx - e.clientX, closePy = sa.y + t * dy - e.clientY;
+            if (Math.hypot(closePx, closePy) < SEG_HIT) {
+              // De Casteljau split at t
+              const mp = modelPositionRef.current;
+              const P0 = A.pos3D;
+              const P3 = B.pos3D;
+              const midDef = (a, b, f) => ({ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, z: a.z + (b.z - a.z) * f });
+              const P1 = A.h2 ?? midDef(P0, P3, 0.33);
+              const P2 = B.h1 ?? midDef(P0, P3, 0.67);
+              const Q0 = midDef(P0, P1, t);
+              const Q1 = midDef(P1, P2, t);
+              const Q2 = midDef(P2, P3, t);
+              const R0 = midDef(Q0, Q1, t);
+              const R1 = midDef(Q1, Q2, t);
+              const S  = midDef(R0, R1, t);
+              const newAnchor = { id: Date.now() + Math.random(), pos3D: S, h1: R0, h2: R1, pathIndex: A.pathIndex };
+              setPenAnchors(prev => {
+                const next = [...prev];
+                next[si] = { ...next[si], h2: Q0 };
+                next[si + 1] = { ...next[si + 1], h1: Q2 };
+                next.splice(si + 1, 0, newAnchor);
+                return next;
+              });
+              return;
+            }
+          }
+        }
+      }
+
+      for (const anchor of penAnchors) {
+        const sp = screenPos(anchor.pos3D);
+        if (sp && Math.hypot(e.clientX - sp.x, e.clientY - sp.y) < ANCHOR_HIT) {
+          setSelectedAnchorId?.(anchor.id);
+          const st = threeStateRef.current;
+          const mp = modelPositionRef.current;
+          const worldPos = new THREE.Vector3(anchor.pos3D.x + mp[0], anchor.pos3D.y + mp[1], anchor.pos3D.z + mp[2]);
+          const normal = st ? st.camera.getWorldDirection(new THREE.Vector3()).negate() : new THREE.Vector3(0, 0, 1);
+          handlePlaneRef.current = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, worldPos);
+          draggingAnchorRef.current = { id: anchor.id, which: 'pos' };
+          return;
+        }
+        if (anchor.h1) {
+          const sp1 = screenPos(anchor.h1);
+          if (sp1 && Math.hypot(e.clientX - sp1.x, e.clientY - sp1.y) < HANDLE_HIT) {
+            const st = threeStateRef.current;
+            const mp = modelPositionRef.current;
+            const worldPos = new THREE.Vector3(anchor.h1.x + mp[0], anchor.h1.y + mp[1], anchor.h1.z + mp[2]);
+            const normal = st ? st.camera.getWorldDirection(new THREE.Vector3()).negate() : new THREE.Vector3(0, 0, 1);
+            handlePlaneRef.current = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, worldPos);
+            draggingAnchorRef.current = { id: anchor.id, which: 'h1' };
+            return;
+          }
+        }
+        if (anchor.h2) {
+          const sp2 = screenPos(anchor.h2);
+          if (sp2 && Math.hypot(e.clientX - sp2.x, e.clientY - sp2.y) < HANDLE_HIT) {
+            const st = threeStateRef.current;
+            const mp = modelPositionRef.current;
+            const worldPos = new THREE.Vector3(anchor.h2.x + mp[0], anchor.h2.y + mp[1], anchor.h2.z + mp[2]);
+            const normal = st ? st.camera.getWorldDirection(new THREE.Vector3()).negate() : new THREE.Vector3(0, 0, 1);
+            handlePlaneRef.current = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, worldPos);
+            draggingAnchorRef.current = { id: anchor.id, which: 'h2' };
+            return;
+          }
+        }
+      }
+
+      // In direct select mode, clicking empty space commits the path back
+      if (directSelect) { finalizePath(); setDirectSelect?.(false); return; }
+
       // Close the loop: clicking near the FIRST anchor finishes the path closed.
       if (penAnchors.length >= 2) {
         const st0 = threeStateRef.current;
@@ -4227,7 +5049,6 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
           const sy = rect0.top + (-proj.y * 0.5 + 0.5) * rect0.height;
           if (Math.hypot(e.clientX - sx, e.clientY - sy) < 16) {
             isDraggingHandleRef.current = false;
-            // Append a copy of the first anchor so the bézier returns to the start.
             const closing = { ...first, id: Date.now() + Math.random() };
             finalizePath([...penAnchors, closing]);
             return;
@@ -4245,14 +5066,11 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
         hit = { point: p, normal: n };
       }
       const mp = modelPositionRef.current;
-      // Lift the anchor slightly off the surface (small gap, similar to the pencil)
-      // so the pen path floats just above the geometry instead of z-fighting it.
       const PEN_OFFSET = 0.045;
       const liftedPoint = hit.point.clone().add(hit.normal.clone().multiplyScalar(PEN_OFFSET));
       const localPos = { x: liftedPoint.x - mp[0], y: liftedPoint.y - mp[1], z: liftedPoint.z - mp[2] };
       const newAnchor = { id: Date.now() + Math.random(), pos3D: localPos, h1: null, h2: null };
       setPenAnchors(prev => [...prev, newAnchor]);
-      // Set up handle plane (tangent to surface, or camera-facing in space)
       handlePlaneRef.current = new THREE.Plane().setFromNormalAndCoplanarPoint(hit.normal, liftedPoint);
       handleWorldAnchorRef.current = liftedPoint.clone();
       isDraggingHandleRef.current = true;
@@ -4264,14 +5082,31 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
     };
 
     const onMove = (e) => {
+      // Dragging an existing anchor or handle
+      if (draggingAnchorRef.current) {
+        const hitPos = getHandlePlaneHit(e.clientX, e.clientY);
+        if (!hitPos) return;
+        const mp = modelPositionRef.current;
+        const local = { x: hitPos.x - mp[0], y: hitPos.y - mp[1], z: hitPos.z - mp[2] };
+        const { id, which } = draggingAnchorRef.current;
+        setPenAnchors(prev => prev.map(a => {
+          if (a.id !== id) return a;
+          if (which === 'pos') {
+            const dx = local.x - a.pos3D.x, dy = local.y - a.pos3D.y, dz = local.z - a.pos3D.z;
+            return { ...a, pos3D: local, h1: a.h1 ? { x: a.h1.x + dx, y: a.h1.y + dy, z: a.h1.z + dz } : null, h2: a.h2 ? { x: a.h2.x + dx, y: a.h2.y + dy, z: a.h2.z + dz } : null };
+          }
+          if (which === 'h1') return { ...a, h1: local };
+          if (which === 'h2') return { ...a, h2: local };
+          return a;
+        }));
+        return;
+      }
       if (!isDraggingHandleRef.current) return;
       const hitPos = getHandlePlaneHit(e.clientX, e.clientY);
       if (!hitPos) return;
       const mp = modelPositionRef.current;
       const anchor = handleWorldAnchorRef.current;
       if (!anchor) return;
-      // Only set handles if drag distance is significant (> 8px in screen)
-      const dx = e.clientX - (e.clientX - (hitPos.x - anchor.x)), dy = e.clientY - (e.clientY - (hitPos.y - anchor.y));
       const localHandle = { x: hitPos.x - mp[0], y: hitPos.y - mp[1], z: hitPos.z - mp[2] };
       setPenAnchors(prev => {
         if (!prev.length) return prev;
@@ -4280,7 +5115,6 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
         const ddx = localHandle.x - last.pos3D.x;
         const ddy = localHandle.y - last.pos3D.y;
         const ddz = localHandle.z - last.pos3D.z;
-        // Only update handles if drag is meaningful (> 0.01 world units)
         if (Math.hypot(ddx, ddy, ddz) > 0.01) {
           last.h2 = localHandle;
           last.h1 = { x: last.pos3D.x - ddx, y: last.pos3D.y - ddy, z: last.pos3D.z - ddz };
@@ -4290,7 +5124,12 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
       });
     };
 
-    const onUp = () => { isDraggingHandleRef.current = false; handlePlaneRef.current = null; handleWorldAnchorRef.current = null; };
+    const onUp = () => {
+      draggingAnchorRef.current = null;
+      isDraggingHandleRef.current = false;
+      handlePlaneRef.current = null;
+      handleWorldAnchorRef.current = null;
+    };
 
     const onWheel = (e) => {
       e.preventDefault();
@@ -4308,43 +5147,65 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
       overlay.removeEventListener('pointerup', onUp);
       overlay.removeEventListener('wheel', onWheel);
     };
-  }, [active, getRaycastHit, getHandlePlaneHit, finalizePath, setPenAnchors, threeStateRef, orbitRef]);
+  }, [active, directSelect, setDirectSelect, getRaycastHit, getHandlePlaneHit, finalizePath, setPenAnchors, threeStateRef, orbitRef, setSelectedAnchorId]);
 
-  // Cursor — the sketch cursor is always the filled pen.
+  // Cursor — pen / pen-add / pen-remove based on hover proximity; direct-select arrow when in that mode.
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
     if (!active) { overlay.style.cursor = ''; return; }
-    const updateCursor = () => { overlay.style.cursor = CURSOR_PEN_DRAW; };
-    const onDown = () => updateCursor();
-    const onUp = () => updateCursor();
-    overlay.style.cursor = CURSOR_PEN_DRAW;
-    window.addEventListener('pointermove', updateCursor, { passive: true });
-    window.addEventListener('pointerdown', onDown, { passive: true });
-    window.addEventListener('pointerup', onUp, { passive: true });
-    return () => {
-      window.removeEventListener('pointermove', updateCursor);
-      window.removeEventListener('pointerdown', onDown);
-      window.removeEventListener('pointerup', onUp);
+
+    const ANCHOR_HIT = 14;
+    const SEG_HIT = 10;
+
+    const updateCursor = (e) => {
+      // Direct-select mode: always white arrow, never pen cursors
+      if (directSelect) { overlay.style.cursor = CURSOR_DIRECT_SELECT; return; }
+
+      if (!e || e.clientX === undefined) { overlay.style.cursor = CURSOR_PEN; return; }
+      const st = threeStateRef.current;
+      const mp = modelPositionRef.current;
+      if (st && penAnchors.length > 0) {
+        const rect = st.gl.domElement.getBoundingClientRect();
+        const w = rect.width, h = rect.height;
+        const proj2d = (pos3d) => {
+          const v = new THREE.Vector3(pos3d.x + mp[0], pos3d.y + mp[1], pos3d.z + mp[2]).project(st.camera);
+          return { x: (v.x + 1) / 2 * w + rect.left, y: (1 - (v.y + 1) / 2) * h + rect.top };
+        };
+        const lastId = penAnchors[penAnchors.length - 1]?.id;
+        // Anchor proximity → remove cursor (skip the active last anchor)
+        for (const a of penAnchors) {
+          if (a.id === lastId) continue;
+          const s = proj2d(a.pos3D);
+          if (Math.hypot(e.clientX - s.x, e.clientY - s.y) < ANCHOR_HIT) {
+            overlay.style.cursor = CURSOR_PEN_REMOVE;
+            return;
+          }
+        }
+        // Segment proximity → add cursor
+        for (let i = 0; i < penAnchors.length - 1; i++) {
+          const sa = proj2d(penAnchors[i].pos3D);
+          const sb = proj2d(penAnchors[i + 1].pos3D);
+          const dx = sb.x - sa.x, dy = sb.y - sa.y, lenSq = dx * dx + dy * dy;
+          if (lenSq === 0) continue;
+          const t = Math.max(0, Math.min(1, ((e.clientX - sa.x) * dx + (e.clientY - sa.y) * dy) / lenSq));
+          if (Math.hypot(sa.x + t * dx - e.clientX, sa.y + t * dy - e.clientY) < SEG_HIT) {
+            overlay.style.cursor = CURSOR_PEN_ADD; return;
+          }
+        }
+      }
+      overlay.style.cursor = CURSOR_PEN;
     };
-  }, [active]);
+
+    overlay.style.cursor = directSelect ? CURSOR_DIRECT_SELECT : CURSOR_PEN;
+    window.addEventListener('pointermove', updateCursor, { passive: true });
+    return () => { window.removeEventListener('pointermove', updateCursor); };
+  }, [active, penAnchors, directSelect, threeStateRef]);
 
   return (
     <>
       <div ref={overlayRef} onContextMenu={(e) => e.preventDefault()} style={{ position: 'fixed', inset: 0, zIndex: active ? 6 : -1, pointerEvents: active ? 'auto' : 'none', touchAction: 'none' }} />
       {/* Pen anchor count pill */}
-      {active && penAnchors.length > 0 && (
-        <div style={{
-          position: 'fixed', bottom: '92px', left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(108,92,231,0.92)', color: DS.white,
-          padding: '5px 14px', borderRadius: '999px',
-          fontFamily: UI.font, fontSize: '10px', fontWeight: '600', letterSpacing: '0.12em',
-          textTransform: 'uppercase', zIndex: 50, pointerEvents: 'none',
-          boxShadow: '0 4px 16px rgba(108,92,231,0.35)',
-        }}>
-          {penAnchors.length} {penAnchors.length === 1 ? 'anchor' : 'anchors'} · Enter to finish · Esc to cancel
-        </div>
-      )}
     </>
   );
 };
@@ -4352,75 +5213,94 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
 /* ═══════════════════════════════════════════════════════════════════════════════
    PEN PREVIEW 3D — renders anchors, handles and preview curve inside Canvas
    ═══════════════════════════════════════════════════════════════════════════════ */
-const PenPreview3D = ({ anchors, modelPosition, color, width }) => {
+const SolidLine3D = ({ points, color, opacity = 1 }) => {
+  const geo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    const flat = new Float32Array(points.flatMap(p => Array.isArray(p) ? p : [p.x, p.y, p.z]));
+    g.setAttribute('position', new THREE.BufferAttribute(flat, 3));
+    return g;
+  }, [points]);
+  return (
+    <line geometry={geo}>
+      <lineBasicMaterial color={color} transparent opacity={opacity} depthTest={false} />
+    </line>
+  );
+};
+
+const PenPreview3D = ({ anchors, modelPosition, color, width, selectedAnchorId }) => {
   const mp = modelPosition || [0, 0, 0];
   const toWorld = (p) => [p.x + mp[0], p.y + mp[1], p.z + mp[2]];
 
-  const previewPoints = useMemo(() => {
-    if (!anchors || anchors.length < 2) return [];
-    const worldAnchors = anchors.map(a => ({
+  // Group anchors by pathIndex so multi-path groups render as separate curves
+  const pathGroups = useMemo(() => {
+    if (!anchors || anchors.length === 0) return [];
+    const map = new Map();
+    anchors.forEach(a => {
+      const idx = a.pathIndex ?? 0;
+      if (!map.has(idx)) map.set(idx, []);
+      map.get(idx).push(a);
+    });
+    return [...map.entries()].sort((a, b) => a[0] - b[0]).map(([, group]) => group);
+  }, [anchors]);
+
+  const pathPoints = useMemo(() => pathGroups.map(group => {
+    if (group.length < 2) return [];
+    const world = group.map(a => ({
       ...a,
       pos3D: { x: a.pos3D.x + mp[0], y: a.pos3D.y + mp[1], z: a.pos3D.z + mp[2] },
       h1: a.h1 ? { x: a.h1.x + mp[0], y: a.h1.y + mp[1], z: a.h1.z + mp[2] } : null,
       h2: a.h2 ? { x: a.h2.x + mp[0], y: a.h2.y + mp[1], z: a.h2.z + mp[2] } : null,
     }));
-    return bezierAnchorsToPoints3D(worldAnchors, mp).map(p => [p.x + mp[0], p.y + mp[1], p.z + mp[2]]);
-  }, [anchors, mp]);
+    return bezierAnchorsToPoints3D(world, mp).map(p => [p.x + mp[0], p.y + mp[1], p.z + mp[2]]);
+  }), [pathGroups, mp]);
 
   if (!anchors || anchors.length === 0) return null;
 
-  // Exact values from Figma node 33:3834
   const BLUE = '#1F4AF1';
-  const SQ = 0.018;   // 9px anchor square (outer)
-  const SQI = 0.011;  // inner cutout for hollow effect
-  const HDL = 0.005;  // ~5px handle dot radius
+  const lastInGroup = new Set(pathGroups.map(g => g[g.length - 1]?.id));
 
   return (
     <>
-      {/* Red stroke — 5px in Figma, drawn first (behind) */}
-      {previewPoints.length >= 2 && (
-        <Line points={previewPoints} color={color} lineWidth={5.0} opacity={0.85} transparent />
-      )}
-      {/* Blue path guide — 1px in Figma, drawn on top of red */}
-      {previewPoints.length >= 2 && (
-        <Line points={previewPoints} color={BLUE} lineWidth={1.0} opacity={0.9} transparent />
-      )}
-      {/* Anchors + handles */}
-      {anchors.map((anchor, i) => {
+      {/* One curve + guide per path group */}
+      {pathPoints.map((pts, gi) => pts.length >= 2 && (
+        <group key={`path-${gi}`}>
+          <Line points={pts} color={color} lineWidth={Math.max(1, (width || 1) * 2.2)} opacity={0.85} transparent dashed={false} />
+          <SolidLine3D points={pts} color={BLUE} opacity={0.9} />
+        </group>
+      ))}
+      {/* All anchors + handles — all draggable regardless of pathIndex */}
+      {anchors.map((anchor, ai) => {
         const wPos = toWorld(anchor.pos3D);
-        const isLast = i === anchors.length - 1;
+        const isLast = lastInGroup.has(anchor.id);
+        const isSelected = anchor.id === selectedAnchorId;
         return (
-          <group key={anchor.id}>
-            {/* Anchor: hollow square (outer blue + inner white), last = filled blue */}
-            <Billboard position={wPos} follow={true}>
-              <mesh>
-                <planeGeometry args={[SQ, SQ]} />
-                <meshBasicMaterial color={BLUE} depthTest={false} />
-              </mesh>
-              {!isLast && (
-                <mesh position={[0, 0, 0.001]}>
-                  <planeGeometry args={[SQI, SQI]} />
-                  <meshBasicMaterial color="white" depthTest={false} />
-                </mesh>
-              )}
-            </Billboard>
-            {/* Handle 1 */}
+          <group key={`${anchor.id}-${ai}`}>
+            <Html position={wPos} center style={{ pointerEvents: 'none' }} zIndexRange={[10, 10]}>
+              <div style={{
+                width: 9, height: 9, boxSizing: 'border-box',
+                border: `1.5px solid ${BLUE}`,
+                background: (selectedAnchorId ? isSelected : isLast) ? BLUE : 'white',
+              }} />
+            </Html>
             {anchor.h1 && (() => {
               const hw = toWorld(anchor.h1);
               return (
                 <>
-                  <Line points={[hw, wPos]} color={BLUE} lineWidth={1.0} opacity={0.7} transparent />
-                  <mesh position={hw}><sphereGeometry args={[HDL, 12, 12]} /><meshBasicMaterial color={BLUE} depthTest={false} /></mesh>
+                  <SolidLine3D points={[hw, wPos]} color={BLUE} opacity={0.7} />
+                  <Html position={hw} center style={{ pointerEvents: 'none' }} zIndexRange={[10, 10]}>
+                    <div style={{ width: 5, height: 5, borderRadius: '50%', background: BLUE }} />
+                  </Html>
                 </>
               );
             })()}
-            {/* Handle 2 */}
             {anchor.h2 && (() => {
               const hw = toWorld(anchor.h2);
               return (
                 <>
-                  <Line points={[wPos, hw]} color={BLUE} lineWidth={0.8} opacity={0.6} transparent />
-                  <mesh position={hw}><sphereGeometry args={[HDL, 12, 12]} /><meshBasicMaterial color={BLUE} depthTest={false} /></mesh>
+                  <SolidLine3D points={[wPos, hw]} color={BLUE} opacity={0.7} />
+                  <Html position={hw} center style={{ pointerEvents: 'none' }} zIndexRange={[10, 10]}>
+                    <div style={{ width: 5, height: 5, borderRadius: '50%', background: BLUE }} />
+                  </Html>
                 </>
               );
             })()}
@@ -5024,14 +5904,10 @@ const UnifiedAnnotationsDrawer = ({
   const setOpen = onSetNotesOpen !== undefined ? onSetNotesOpen : setInternalOpen;
   const [confirmClear, setConfirmClear] = useState(false);
 
-  // Auto-open when annotation mode activates
-  useEffect(() => { if (annotationMode) setOpen(true); }, [annotationMode]);
 
   // Auto-open/switch/close panel based on active tool
   useEffect(() => {
-    if (penActive) { setView('sketches'); setOpen(true); }
-    else if (commentActive) { setView('comments'); setOpen(true); }
-    else { setOpen(false); }
+    if (!penActive && !commentActive) { setOpen(false); }
   }, [penActive, commentActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleStrokeVisibility = (id) => setRedlines(prev => prev.map(r => r.id === id ? { ...r, visible: !r.visible } : r));
@@ -5348,10 +6224,10 @@ const ShowcaseUI = (props) => {
         );
       })()}
 
-      {/* Comment detail popup — shown when a pin is clicked */}
+      {/* Comment detail popup — only for default comment pins; callouts expand inline */}
       {expandedCommentId && (() => {
         const t = tooltips.find(x => x.id === expandedCommentId);
-        if (!t) return null;
+        if (!t || t.commentMode !== 'default') return null;
         return (
           <CommentDetailPopup
             tooltip={t}
@@ -5702,6 +6578,11 @@ export default function App() {
   const [activeTool, setActiveTool] = useState('cursor'); // 'cursor' | 'pen' | 'pencil' | 'comment' | 'text' | 'emoji'
   const [pendingStrokeId, setPendingStrokeId] = useState(null); // stroke waiting for title/note
   const [penAnchors, setPenAnchors] = useState([]);
+  const [penDirectSelect, setPenDirectSelect] = useState(false);
+  const [selectedAnchorId, setSelectedAnchorId] = useState(null);
+  const [editingStrokeGroupId, setEditingStrokeGroupId] = useState(null);
+  const editingStrokeGroupIdRef = useRef(null);
+  useEffect(() => { editingStrokeGroupIdRef.current = editingStrokeGroupId; }, [editingStrokeGroupId]);
   // Derived modes — single source of truth
   const editMode = annotationMode && activeTool === 'comment';
   const redlineMode = annotationMode && activeTool === 'pencil';
@@ -5774,6 +6655,10 @@ export default function App() {
   const gClickedRef = useRef(false);
   const activeModeRef = useRef(activeMode);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [calloutsOpen, setCalloutsOpen] = useState(false);
+  const [calloutsAllHidden, setCalloutsAllHidden] = useState(false);
+  const [hiddenCalloutIds, setHiddenCalloutIds] = useState(() => new Set());
+  const [hoveredCalloutId, setHoveredCalloutId] = useState(null);
   const [scene, setScene] = useState(DEFAULT_SCENE);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeFlyId, setActiveFlyId] = useState(null);
@@ -5795,6 +6680,31 @@ export default function App() {
   const [strokeCounter, setStrokeCounter] = useState(1);
   const [surfaceOffset, setSurfaceOffset] = useState(0.05);
   const [selectedRedlineId, setSelectedRedlineId] = useState(null);
+  const selectedRedlineIdRef = useRef(null);
+  const [selectedPenStrokeId, setSelectedPenStrokeId] = useState(null); // drives group highlight, no popup
+  const [siblingPenAnchors, setSiblingPenAnchors] = useState([]); // anchor sets for grouped strokes in edit mode
+  useEffect(() => { selectedRedlineIdRef.current = selectedRedlineId; }, [selectedRedlineId]);
+  // Live-update selected stroke (and its group siblings) when pen popover controls change
+  useEffect(() => {
+    const sid = selectedRedlineIdRef.current;
+    if (sid) {
+      setRedlines(prev => {
+        const sel = prev.find(r => r.id === sid);
+        const gid = sel?.groupId;
+        return prev.map(r => (r.id === sid || (gid && r.groupId === gid)) ? { ...r, width: redlineWidth } : r);
+      });
+    }
+  }, [redlineWidth]);
+  useEffect(() => {
+    const sid = selectedRedlineIdRef.current;
+    if (sid) {
+      setRedlines(prev => {
+        const sel = prev.find(r => r.id === sid);
+        const gid = sel?.groupId;
+        return prev.map(r => (r.id === sid || (gid && r.groupId === gid)) ? { ...r, color: penColor } : r);
+      });
+    }
+  }, [penColor]);
   const [activeCommentId, setActiveCommentId] = useState(null);
   const [redlinePopupPos, setRedlinePopupPos] = useState({ x: 300, y: 200 });
   const [renderAbove, setRenderAbove] = useState(false);
@@ -5836,7 +6746,61 @@ export default function App() {
     setAutoRotate(false);
     setActiveFlyId(null);
     setExpandedPinId(null);
-  }, []);
+    if (penDirectSelect && penAnchors.length > 0) {
+      const selId = selectedAnchorId;
+      const firstId = penAnchors[0]?.id;
+      const lastId = penAnchors[penAnchors.length - 1]?.id;
+      const isMid = selId && selId !== firstId && selId !== lastId;
+
+      if (isMid) {
+        // Branch: commit current path, start new path from selected anchor
+        const selectedAnchor = penAnchors.find(a => a.id === selId);
+        const mp = modelPosition;
+        const worldAnchors = penAnchors.map(a => ({
+          ...a,
+          pos3D: { x: a.pos3D.x + mp[0], y: a.pos3D.y + mp[1], z: a.pos3D.z + mp[2] },
+          h1: a.h1 ? { x: a.h1.x + mp[0], y: a.h1.y + mp[1], z: a.h1.z + mp[2] } : null,
+          h2: a.h2 ? { x: a.h2.x + mp[0], y: a.h2.y + mp[1], z: a.h2.z + mp[2] } : null,
+        }));
+        const points3D = bezierAnchorsToPoints3D(worldAnchors, mp);
+        const sharedGroupId = editingStrokeGroupIdRef.current ?? (Date.now() + Math.random());
+        if (points3D.length >= 2) {
+          const originalStroke = {
+            id: Date.now() + Math.random(), points3D, color: penColor, width: redlineWidth,
+            visible: true, name: `Pen ${strokeCounter}`, opacity: strokeOpacity, comments: [],
+            type: 'sketch-pen', created: Date.now(),
+            anchors: penAnchors.map(a => ({ ...a })),
+            groupId: sharedGroupId,
+          };
+          setRedlines(prev => {
+            // Also tag any existing group members that lack a groupId
+            const updated = prev.map(r => editingStrokeGroupId && r.groupId === editingStrokeGroupId ? r : r);
+            return [...updated, originalStroke];
+          });
+          setUndoStack([]);
+          setActionHistory(h => [...h, { type: 'redline', id: originalStroke.id }]);
+          setStrokeCounter(n => n + 1);
+        }
+        editingStrokeGroupIdRef.current = sharedGroupId;
+        setEditingStrokeGroupId(sharedGroupId);
+        // Start fresh from the selected anchor (no handles — clean branch point)
+        if (selectedAnchor) {
+          // Keep the original anchor id so the junction is shared across both paths when group-edited
+          setPenAnchors([{ ...selectedAnchor, h1: null, h2: null }]);
+          setSelectedAnchorId(null);
+        }
+      } else {
+        // Endpoint: reorder so selected anchor is the continuation endpoint
+        setPenAnchors(prev => {
+          if (!selId) return prev;
+          if (selId === lastId) return prev;
+          if (selId === firstId) return [...prev].reverse().map(a => ({ ...a, h1: a.h2, h2: a.h1 }));
+          return prev;
+        });
+      }
+    }
+    setPenDirectSelect(false);
+  }, [penDirectSelect, selectedAnchorId, penAnchors, modelPosition, penColor, redlineWidth, strokeOpacity, strokeCounter]);
   const selectPen = useCallback(() => enterDrawing('pen'), [enterDrawing]);
   const selectPencil = useCallback(() => enterDrawing('pencil'), [enterDrawing]);
   const selectDrawing = useCallback(() => enterDrawing(lastDrawToolRef.current || 'pencil'), [enterDrawing]);
@@ -5850,6 +6814,7 @@ export default function App() {
     setActiveFlyId(null);
     setExpandedPinId(null);
     setPanelOpen(true);
+    if (mode === 'callout') setCalloutsOpen(true);
   }, []);
   const selectCamera = useCallback(() => {
     setCameraVariant('camera');
@@ -6195,8 +7160,8 @@ export default function App() {
 
       if (e.altKey) return;
 
-      // Enter — toggle turntable (not in presentation mode)
-      if (e.code === 'Enter' && !e.shiftKey && !presentationMode) { e.preventDefault(); setAutoRotate(v => !v); return; }
+      // Enter — toggle turntable (not in presentation mode, not when pen path is active)
+      if (e.code === 'Enter' && !e.shiftKey && !presentationMode && penAnchors.length === 0) { e.preventDefault(); setAutoRotate(v => !v); return; }
       // F → frame model; Home → reset camera
       if (e.code === 'KeyF' && !e.shiftKey) { e.preventDefault(); findMySketch(); return; }
       if (e.code === 'Home' && !e.shiftKey) { e.preventDefault(); flyTo(DEFAULT_CAMERA.position, DEFAULT_CAMERA.target, 800); return; }
@@ -6224,7 +7189,11 @@ export default function App() {
       // Delete / Backspace → delete selected annotation
       if (e.code === 'Delete' || e.code === 'Backspace') {
         if (selectedRedlineId) {
-          setRedlines(prev => prev.filter(r => r.id !== selectedRedlineId));
+          setRedlines(prev => {
+            const sel = prev.find(r => r.id === selectedRedlineId);
+            const gid = sel?.groupId;
+            return prev.filter(r => r.id !== selectedRedlineId && !(gid && r.groupId === gid));
+          });
           setSelectedRedlineId(null);
           return;
         }
@@ -6374,7 +7343,12 @@ export default function App() {
     setDraggingId(next);
     setClickPoint(null);
     if (next !== null) {
-      setPanelOpen(true);
+      const tip = tooltips.find(t => t.id === next);
+      if (tip && tip.commentMode !== 'default') {
+        setCalloutsOpen(true);
+      } else {
+        setPanelOpen(true);
+      }
       markPinSeen(next);
     }
   };
@@ -6408,15 +7382,69 @@ export default function App() {
   }, []);
 
   const handlePenPathCommitted = useCallback((stroke) => {
-    setRedlines(prev => [...prev, stroke]);
+    const gid = editingStrokeGroupIdRef.current;
+    const anchors = stroke.anchors || [];
+    const pathIndices = [...new Set(anchors.map(a => a.pathIndex ?? 0))].sort((a, b) => a - b);
+
+    if (pathIndices.length > 1) {
+      // Multi-path group — split anchors back into individual strokes
+      const newStrokes = pathIndices.map((idx, i) => {
+        const group = anchors.filter(a => (a.pathIndex ?? 0) === idx);
+        const pts = bezierAnchorsToPoints3D(group, [0, 0, 0]);
+        return {
+          id: Date.now() + Math.random() + i,
+          type: 'sketch-pen',
+          anchors: group.map(a => { const { pathIndex: _pi, ...rest } = a; return rest; }),
+          points3D: pts,
+          color: stroke.color, width: stroke.width, opacity: stroke.opacity,
+          visible: true, name: stroke.name || `Pen ${Date.now() + i}`,
+          comments: [], groupId: gid ?? stroke.groupId, created: Date.now(),
+        };
+      });
+      setRedlines(r => [...r, ...newStrokes]);
+    } else {
+      // Single path (no grouping or first stroke of a group)
+      const cleanAnchors = anchors.map(a => { const { pathIndex: _pi, ...rest } = a; return rest; });
+      const taggedStroke = { ...stroke, anchors: cleanAnchors, groupId: gid ?? stroke.groupId };
+      setRedlines(r => [...r, taggedStroke]);
+    }
+
+    setSiblingPenAnchors([]);
     setUndoStack([]);
     setActionHistory(h => [...h, { type: 'redline', id: stroke.id }]);
     setStrokeCounter(n => n + 1);
     setPenAnchors([]);
-    // Switch to select tool after committing a path
+    editingStrokeGroupIdRef.current = null;
+    setEditingStrokeGroupId(null);
     setAnnotationMode(false);
     setCameraTool(false);
   }, []);
+
+  // Restore all group paths from penAnchors back to committed strokes when pen edit is cancelled
+  const handleCancelPenEdit = useCallback(() => {
+    setPenAnchors(prev => {
+      if (prev.length > 0) {
+        const gid = editingStrokeGroupIdRef.current;
+        const pathIndices = [...new Set(prev.map(a => a.pathIndex ?? 0))].sort((a, b) => a - b);
+        const restored = pathIndices.map((idx, i) => {
+          const group = prev.filter(a => (a.pathIndex ?? 0) === idx);
+          return {
+            id: Date.now() + Math.random() + i, type: 'sketch-pen',
+            anchors: group.map(a => { const { pathIndex: _pi, ...rest } = a; return rest; }),
+            points3D: bezierAnchorsToPoints3D(group, [0, 0, 0]),
+            color: penColor, width: redlineWidth, opacity: strokeOpacity,
+            visible: true, name: `Pen ${Date.now() + i}`, comments: [],
+            groupId: gid, created: Date.now(),
+          };
+        });
+        setRedlines(r => [...r, ...restored]);
+      }
+      return [];
+    });
+    setSiblingPenAnchors([]);
+    editingStrokeGroupIdRef.current = null;
+    setEditingStrokeGroupId(null);
+  }, [penColor, redlineWidth, strokeOpacity]);
 
   const handlePostSketchSave = useCallback(({ title, note } = {}) => {
     if (!pendingStrokeId) return;
@@ -6521,6 +7549,72 @@ export default function App() {
     }
   }, [flyTo]);
 
+  const handleEditPenStroke = useCallback((stroke) => {
+    setRedlines(prev => {
+      const gid = stroke.groupId;
+      const groupStrokes = gid
+        ? prev.filter(r => r.groupId === gid && r.type === 'sketch-pen')
+        : [stroke];
+      // Merge all group anchors, tagging each with pathIndex
+      const merged = groupStrokes.flatMap((s, idx) =>
+        (s.anchors || []).map(a => ({ ...a, pathIndex: idx }))
+      );
+      setPenAnchors(merged);
+      setSiblingPenAnchors([]);
+      return prev.filter(r => !groupStrokes.some(g => g.id === r.id));
+    });
+    setAnnotationMode(true);
+    setActiveTool('pen');
+    setSelectedRedlineId(null);
+    setPenDirectSelect(true);
+    editingStrokeGroupIdRef.current = stroke.groupId ?? null;
+    setEditingStrokeGroupId(stroke.groupId ?? null);
+  }, []);
+
+  // Click / double-click on committed pen strokes
+  useEffect(() => {
+    const dpr = window.devicePixelRatio || 1;
+    const HIT = 24 * dpr;
+
+    const findNearestPenStroke = (clientX, clientY, strokes, mp, camera) => {
+      const w = window.innerWidth * dpr, h = window.innerHeight * dpr;
+      const cx = clientX * dpr, cy = clientY * dpr;
+      const proj = (p) => {
+        const v = new THREE.Vector3(p.x, p.y, p.z).project(camera);
+        return { x: (v.x + 1) / 2 * w, y: (1 - (v.y + 1) / 2) * h };
+      };
+      const distSeg = (px, py, x1, y1, x2, y2) => {
+        const dx = x2 - x1, dy = y2 - y1, lenSq = dx * dx + dy * dy;
+        if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+        const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+        return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+      };
+      let nearest = null, minDist = HIT;
+      for (const stroke of strokes) {
+        if (stroke.type !== 'sketch-pen' || !stroke.visible || !stroke.points3D || stroke.points3D.length < 2) continue;
+        const pts2D = stroke.points3D.map(p => proj({ x: p.x + mp[0], y: p.y + mp[1], z: p.z + mp[2] }));
+        for (let i = 0; i < pts2D.length - 1; i++) {
+          const d = distSeg(cx, cy, pts2D[i].x, pts2D[i].y, pts2D[i + 1].x, pts2D[i + 1].y);
+          if (d < minDist) { minDist = d; nearest = stroke; }
+        }
+      }
+      return nearest;
+    };
+
+    const onDblClick = (e) => {
+      const st = threeStateRef.current;
+      if (!st) return;
+      const nearest = findNearestPenStroke(e.clientX, e.clientY, redlines, modelPosition, st.camera);
+      if (!nearest) return;
+      handleEditPenStroke(nearest);
+    };
+
+    window.addEventListener('dblclick', onDblClick);
+    return () => {
+      window.removeEventListener('dblclick', onDblClick);
+    };
+  }, [redlines, modelPosition, handleEditPenStroke]);
+
   const handleRedlineStrokeUpdate = useCallback((id, updates) => {
     setRedlines(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
   }, []);
@@ -6605,6 +7699,10 @@ export default function App() {
       onDoubleClick={handleLaserDblClick}
     >
       <style>{`
+        @keyframes calloutFadeIn {
+          from { opacity: 0; transform: translateY(-50%) translateX(-4px); }
+          to   { opacity: 1; transform: translateY(-50%) translateX(0); }
+        }
         @keyframes pingRing1 {
           0%   { transform: translate(-50%,-50%) scale(0.3); opacity: 0.85; }
           100% { transform: translate(-50%,-50%) scale(4.5); opacity: 0; }
@@ -6765,11 +7863,11 @@ export default function App() {
 
       {!presentationMode && (
         <BottomToolbar
-          selectActive={!annotationMode && !cameraTool}
-          penActive={annotationMode && (activeTool === 'pen' || activeTool === 'pencil')}
+          selectActive={(!annotationMode && !cameraTool) || penDirectSelect}
+          penActive={annotationMode && (activeTool === 'pen' || activeTool === 'pencil') && !penDirectSelect}
           commentActive={annotationMode && activeTool === 'comment'}
           cameraActive={cameraTool}
-          navVariant={activeMode === 'laser' ? 'laser' : navTool}
+          navVariant={penDirectSelect ? 'direct' : (activeMode === 'laser' ? 'laser' : navTool)}
           penVariant={(activeTool === 'pen' || activeTool === 'pencil') ? activeTool : (lastDrawToolRef.current || 'pen')}
           commentVariant={commentMode}
           cameraVariant={cameraVariant}
@@ -6779,13 +7877,14 @@ export default function App() {
           onSelectDrawing={selectDrawing}
           onSelectPen={selectPen}
           onSelectPencil={selectPencil}
-          onSelectComment={() => { setAnnotationMode(true); setActiveTool('comment'); }}
+          onSelectComment={(mode) => selectComment(mode)}
           onSelectCamera={() => { setAnnotationMode(false); setCameraTool(true); }}
           onSelectSection={null}
           penColor={penColor} setPenColor={setPenColor}
           pencilColor={pencilColor} setPencilColor={setPencilColor}
           commentColor={redlineColor} setCommentColor={setRedlineColor}
-          opacity={strokeOpacity} setOpacity={setStrokeOpacity}
+          strokeWidth={redlineWidth} setStrokeWidth={setRedlineWidth}
+          penHasActivePath={penDirectSelect && penAnchors.length > 0}
           onCapture={() => { /* TODO: capture — no screenshot engine in repo yet */ }}
           cropOn={cameraSquare} onToggleCrop={() => setCameraSquare(v => !v)}
           onUndo={handleUndoRedline} onRedo={handleRedoRedline}
@@ -6956,8 +8055,57 @@ export default function App() {
         strokeColor={penColor}
         strokeWidth={redlineWidth}
         strokeOpacity={strokeOpacity}
-        strokeCounter={strokeCounter}        onContextMenu={handleContextMenuOpen}
+        strokeCounter={strokeCounter}
+        onContextMenu={handleContextMenuOpen}
+        directSelect={penDirectSelect}
+        setDirectSelect={setPenDirectSelect}
+        selectedAnchorId={selectedAnchorId}
+        setSelectedAnchorId={setSelectedAnchorId}
+        onCancelEdit={handleCancelPenEdit}
       />
+
+      <CalloutsPanel
+        tooltips={tooltips}
+        open={calloutsOpen && annotationMode && activeTool === 'comment' && commentMode === 'callout'}
+        onOpenChange={setCalloutsOpen}
+        onFlyTo={handleFlyTo}
+        onRemove={(id) => setTooltips(prev => prev.filter(t => t.id !== id))}
+        onRename={(id, label) => setTooltips(prev => prev.map(t => t.id === id ? { ...t, label } : t))}
+        onColorChange={(id, color) => handleUpdateTooltip(id, { color })}
+        onSelect={(id) => { setDraggingId(prev => prev === id ? null : id); }}
+        onOpen={(id) => setExpandedCommentId(prev => prev === id ? null : id)}
+        onHover={setHoveredCalloutId}
+        selectedId={draggingId}
+        onReorder={(orderedIds) => setTooltips(prev => {
+          // Reorder only the callout subset; non-callouts stay put
+          const calloutOrder = new Map(orderedIds.map((id, i) => [id, i]));
+          const updated = prev.map(t => t.commentMode !== 'default' && calloutOrder.has(t.id)
+            ? { ...t, sequenceNumber: calloutOrder.get(t.id) + 1 }
+            : t);
+          return updated;
+        })}
+        editMode={editMode}
+        allHidden={calloutsAllHidden}
+        onToggleAllHidden={() => setCalloutsAllHidden(v => !v)}
+        hiddenIds={hiddenCalloutIds}
+        onToggleHidden={(id) => setHiddenCalloutIds(prev => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id); else next.add(id);
+          return next;
+        })}
+      />
+
+      {penMode && penDirectSelect && penAnchors.length > 0 && (
+        <PenInlineToolbar
+          penAnchors={penAnchors}
+          modelPosition={modelPosition}
+          threeStateRef={threeStateRef}
+          color={penColor}
+          onColorChange={setPenColor}
+          width={redlineWidth}
+          onWidthChange={setRedlineWidth}
+        />
+      )}
 
       <EmojiToolOverlay
         active={annotationMode && activeTool === 'emoji'}
@@ -7006,7 +8154,7 @@ export default function App() {
       >
         <ThreeStateCapture stateRef={threeStateRef} />
         <ViewModeCursor active={!annotationMode} />
-        <CommentsModeCursor active={editMode} />
+        <CommentsModeCursor active={editMode && commentMode !== 'callout'} />
         <BoxSelect active={!annotationMode && !presentationMode} selectedUuids={selectedUuids} setSelectedUuids={setSelectedUuids} setMarquee={setMarquee} />
         <SelectionHighlight selected={selectedUuids} />
         <SelectionOutlines selected={selectedUuids} />
@@ -7054,11 +8202,11 @@ export default function App() {
         )}
 
         {clickPoint && !redlineMode && !presentationMode && <ClickMarker point={clickPoint} nextNumber={tooltips.length + 1} commentMode={commentMode} color={redlineColor} />}
-        <RedlineStrokes3D redlines={redlines} modelPosition={modelPosition} selectedId={selectedRedlineId} hidden={tooltipsHidden || presentationMode} renderAbove={renderAbove} />
+        <RedlineStrokes3D redlines={redlines} modelPosition={modelPosition} hidden={tooltipsHidden || presentationMode} renderAbove={renderAbove} />
         <LiveRedlineStroke points={livePoints} color={pencilColor} width={redlineWidth} modelPosition={modelPosition} hidden={tooltipsHidden || presentationMode} renderAbove={renderAbove} />
         <EmojiAnnotations3D annotations={emojiAnnotations} hidden={tooltipsHidden || presentationMode} />
         <TextAnnotations3D annotations={textAnnotations} hidden={tooltipsHidden || presentationMode} activeTool={annotationMode ? activeTool : 'view'} orbitRef={orbitRef} onMove={handleMoveTextAnnotation} />
-        {!presentationMode && <PenPreview3D anchors={penAnchors} modelPosition={modelPosition} color={penColor} width={redlineWidth} />}
+        {!presentationMode && <PenPreview3D anchors={penAnchors} modelPosition={modelPosition} color={penColor} width={redlineWidth} selectedAnchorId={selectedAnchorId} />}
         {!presentationMode && (<SketchPins
           redlines={redlines.filter(r => r.attachedNote)}
           allRedlines={redlines}
@@ -7075,7 +8223,13 @@ export default function App() {
 
         {!tooltipsHidden && !redlineMode && !penMode && !presentationMode && (
           <TooltipPins
-            tooltips={tooltips} onRemove={handleRemoveTooltip}
+            tooltips={tooltips.filter(t => {
+              if (t.commentMode !== 'default') {
+                if (calloutsAllHidden) return false;
+                if (hiddenCalloutIds.has(t.id)) return false;
+              }
+              return true;
+            })} onRemove={handleRemoveTooltip}
             selectedId={draggingId} onSelect={handleSelectTooltip}
             editMode={editMode} onFlyTo={handleFlyTo}
             expandedId={expandedCommentId} onSetExpanded={(id) => setExpandedCommentId(prev => prev === id ? null : id)}
@@ -7083,6 +8237,7 @@ export default function App() {
             renderAbove={renderAbove}
             onUpdatePin={handleUpdateTooltip}
             isPinSeen={isPinSeenFn}
+            highlightedId={hoveredCalloutId}
           />
         )}
 
@@ -7102,7 +8257,7 @@ export default function App() {
           enableDamping={true}
           dampingFactor={0.06}
           zoomSpeed={shiftHeld ? 0.45 : 1.0}
-          minDistance={1.2}
+          minDistance={0.3}
           maxDistance={12}
           maxPolarAngle={Math.PI}
           autoRotate={autoRotate}
