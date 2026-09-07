@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, Environment, Html, ContactShadows, Line, TransformControls } from '@react-three/drei';
+import { OrbitControls, Environment, Html, ContactShadows, Line, TransformControls, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { MessageSquare as NotesIcon, PenTool as SketchIcon } from 'lucide-react';
@@ -4372,29 +4372,47 @@ const PenPreview3D = ({ anchors, modelPosition, color, width }) => {
   // (lineCap/lineJoin 'round') give the dashed line its rounded corners.
   const lineW = Math.max(1.1, (width || 1) * 1.3);
 
+  const BLUE = '#2B3FE0';
+  const SQ = 0.046;   // anchor square outer size
+  const SQI = 0.030;  // anchor square inner (hollow cutout)
+  const HDL = 0.013;  // handle dot radius
+
   return (
     <>
-      {/* Preview bezier curve — fine dashes, rounded caps */}
+      {/* Blue path guide */}
       {previewPoints.length >= 2 && (
-        <Line points={previewPoints} color={color} lineWidth={lineW} opacity={0.7} transparent dashed dashScale={64} dashSize={0.32} gapSize={0.2} lineCap="round" lineJoin="round" />
+        <Line points={previewPoints} color={BLUE} lineWidth={lineW} opacity={0.9} transparent />
       )}
-      {/* Anchor + handle nodes */}
+      {/* Red stroke preview on top */}
+      {previewPoints.length >= 2 && (
+        <Line points={previewPoints} color={color} lineWidth={Math.max(0.8, lineW * 0.55)} opacity={0.85} transparent />
+      )}
+      {/* Anchors + handles */}
       {anchors.map((anchor, i) => {
         const wPos = toWorld(anchor.pos3D);
+        const isLast = i === anchors.length - 1;
         return (
           <group key={anchor.id}>
-            {/* Anchor node — small round dot */}
-            <mesh position={wPos}>
-              <sphereGeometry args={[0.02, 16, 16]} />
-              <meshBasicMaterial color={color} />
-            </mesh>
+            {/* Anchor: hollow square (outer blue + inner white), last = filled blue */}
+            <Billboard position={wPos} follow={true}>
+              <mesh>
+                <planeGeometry args={[SQ, SQ]} />
+                <meshBasicMaterial color={BLUE} depthTest={false} />
+              </mesh>
+              {!isLast && (
+                <mesh position={[0, 0, 0.001]}>
+                  <planeGeometry args={[SQI, SQI]} />
+                  <meshBasicMaterial color="white" depthTest={false} />
+                </mesh>
+              )}
+            </Billboard>
             {/* Handle 1 */}
             {anchor.h1 && (() => {
               const hw = toWorld(anchor.h1);
               return (
                 <>
-                  <Line points={[hw, wPos]} color={color} lineWidth={0.9} opacity={0.3} transparent />
-                  <mesh position={hw}><sphereGeometry args={[0.014, 12, 12]} /><meshBasicMaterial color={color} transparent opacity={0.55} /></mesh>
+                  <Line points={[hw, wPos]} color={BLUE} lineWidth={0.8} opacity={0.6} transparent />
+                  <mesh position={hw}><sphereGeometry args={[HDL, 12, 12]} /><meshBasicMaterial color={BLUE} depthTest={false} /></mesh>
                 </>
               );
             })()}
@@ -4403,8 +4421,8 @@ const PenPreview3D = ({ anchors, modelPosition, color, width }) => {
               const hw = toWorld(anchor.h2);
               return (
                 <>
-                  <Line points={[wPos, hw]} color={color} lineWidth={0.9} opacity={0.3} transparent />
-                  <mesh position={hw}><sphereGeometry args={[0.014, 12, 12]} /><meshBasicMaterial color={color} transparent opacity={0.55} /></mesh>
+                  <Line points={[wPos, hw]} color={BLUE} lineWidth={0.8} opacity={0.6} transparent />
+                  <mesh position={hw}><sphereGeometry args={[HDL, 12, 12]} /><meshBasicMaterial color={BLUE} depthTest={false} /></mesh>
                 </>
               );
             })()}
