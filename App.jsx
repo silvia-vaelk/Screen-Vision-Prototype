@@ -8155,10 +8155,7 @@ export default function App() {
         <ThreeStateCapture stateRef={threeStateRef} />
         <ViewModeCursor active={!annotationMode} />
         <CommentsModeCursor active={editMode && commentMode !== 'callout'} />
-        <BoxSelect active={!annotationMode && !presentationMode} selectedUuids={selectedUuids} setSelectedUuids={setSelectedUuids} setMarquee={setMarquee} />
-        <SelectionHighlight selected={selectedUuids} />
-        <SelectionOutlines selected={selectedUuids} />
-        {!annotationMode && !presentationMode && <SelectionGizmo selected={selectedUuids} orbitRef={orbitRef} />}
+        {/* Model mesh selection disabled — re-enable by restoring BoxSelect/SelectionHighlight/SelectionOutlines/SelectionGizmo */}
         <PenModeCursor active={penMode} />
         {/* FIX: reactively update tone mapping exposure when scene changes */}
         <GlUpdater tonemapping={scene.tonemapping} cameraFov={scene.cameraFov} />
