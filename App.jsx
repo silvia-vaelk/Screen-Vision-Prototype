@@ -4373,9 +4373,9 @@ const PenPreview3D = ({ anchors, modelPosition, color, width }) => {
   const lineW = Math.max(1.1, (width || 1) * 1.3);
 
   const BLUE = '#2B3FE0';
-  const SQ = 0.046;   // anchor square outer size
-  const SQI = 0.030;  // anchor square inner (hollow cutout)
-  const HDL = 0.013;  // handle dot radius
+  const SQ = 0.018;   // anchor square outer size
+  const SQI = 0.011;  // anchor square inner (hollow cutout)
+  const HDL = 0.006;  // handle dot radius
 
   return (
     <>
