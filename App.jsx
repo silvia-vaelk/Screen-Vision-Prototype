@@ -4274,7 +4274,6 @@ const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColo
 
   const handleRowPointerDown = useCallback((e, t) => {
     if (e.button !== 0) return;
-    if (e.target.closest('button')) return;
     e.preventDefault();
     const startX = e.clientX, startY = e.clientY;
     let started = false;
@@ -4533,7 +4532,6 @@ const CalloutRow = ({ t, index, isHidden, isSelected, isDraggingThis, showDropAb
         {/* Label — clickable to open in scene */}
         <span
           title={t.label}
-          onPointerDown={e => e.stopPropagation()}
           onClick={e => { e.stopPropagation(); onOpen?.(); }}
           style={{ flex: 1, fontSize: '14px', fontWeight: 400, color: 'var(--color-text-default)', fontFamily: "'Inter', sans-serif", lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: effectivelyOff ? 0.4 : 1, transition: 'opacity 0.15s, color 0.12s', cursor: 'pointer' }}
           onMouseEnter={e => e.currentTarget.style.color = 'var(--color-text-default)'}
