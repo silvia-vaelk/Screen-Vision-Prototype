@@ -4282,14 +4282,17 @@ const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColo
       if (!started) {
         if (Math.abs(me.clientX - startX) < 6 && Math.abs(me.clientY - startY) < 6) return;
         started = true;
-        // Snapshot row rects BEFORE state changes so DropGap insertion doesn't shift them
+        // Snapshot row rects BEFORE state changes so DropGap insertion doesn't shift them.
+        // Map attr string → actual typed id so === comparisons with t.id work correctly.
         if (listRef.current) {
+          const idLookup = new Map(callouts.map(c => [String(c.id), c.id]));
           rowSnapshotRef.current = Array.from(listRef.current.querySelectorAll('[data-callout-row]'))
-            .filter(r => r.getAttribute('data-callout-row') !== t.id)
             .map(r => {
+              const typedId = idLookup.get(r.getAttribute('data-callout-row'));
               const rect = r.getBoundingClientRect();
-              return { id: r.getAttribute('data-callout-row'), top: rect.top, bottom: rect.bottom };
-            });
+              return { id: typedId, top: rect.top, bottom: rect.bottom };
+            })
+            .filter(r => r.id !== t.id);
         }
         setDragRowId(t.id);
         setDragGhost({ x: me.clientX, y: me.clientY, label: t.label || `Callout ${t.sequenceNumber ?? ''}` });
@@ -4297,12 +4300,20 @@ const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColo
       if (!started) return;
       // Update ghost position
       setDragGhost(g => g ? { ...g, x: me.clientX, y: me.clientY } : null);
-      // Compute drop target from snapshot
+      // Compute drop target from snapshot (nearest-row approach matching LayersDrawer)
       const rows = rowSnapshotRef.current ?? [];
       let aft = null; // null = insert before first
+      let bestDist = Infinity;
       for (const row of rows) {
         const mid = (row.top + row.bottom) / 2;
-        if (me.clientY > mid) aft = row.id;
+        const dist = Math.abs(me.clientY - mid);
+        if (dist < bestDist) {
+          bestDist = dist;
+          aft = me.clientY >= mid ? row.id : null;
+          // When cursor is above this row's midpoint, insert before it (= after its predecessor)
+          const idx = rows.indexOf(row);
+          if (me.clientY < mid) aft = idx > 0 ? rows[idx - 1].id : null;
+        }
       }
       dragStateRef.current.dropAfterId = aft;
       setDropAfterId(aft);
