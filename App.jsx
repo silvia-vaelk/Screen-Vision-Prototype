@@ -4223,11 +4223,14 @@ const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColo
   const [dragging, setDragging] = useState(false);
   const [headerHovered, setHeaderHovered] = useState(false);
   const [dragRowId, setDragRowId] = useState(null);
-  const [dropAfterId, setDropAfterId] = useState(null);
+  const [dropAfterId, setDropAfterId] = useState(null); // null = insert at top
+  const [dragGhost, setDragGhost] = useState(null); // { x, y, label }
 
   const panelRef = useRef(null);
   const dragPillRef = useRef(null);
   const listRef = useRef(null);
+  const rowSnapshotRef = useRef(null); // snapshot of row rects taken at drag start
+  const dragStateRef = useRef({ dragRowId: null, dropAfterId: null });
 
   useEffect(() => { if (open) { setPos(null); setSize({ w: 280, h: null }); } }, [open]);
   useEffect(() => { setPos(null); }, [panelTop]);
@@ -4275,35 +4278,50 @@ const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColo
     e.preventDefault();
     const startX = e.clientX, startY = e.clientY;
     let started = false;
-    let currentDropAfterId = null;
 
     const onMove = (me) => {
       if (!started) {
-        if (Math.abs(me.clientX - startX) < 8 && Math.abs(me.clientY - startY) < 8) return;
+        if (Math.abs(me.clientX - startX) < 6 && Math.abs(me.clientY - startY) < 6) return;
         started = true;
+        // Snapshot row rects BEFORE state changes so DropGap insertion doesn't shift them
+        if (listRef.current) {
+          rowSnapshotRef.current = Array.from(listRef.current.querySelectorAll('[data-callout-row]'))
+            .filter(r => r.getAttribute('data-callout-row') !== t.id)
+            .map(r => {
+              const rect = r.getBoundingClientRect();
+              return { id: r.getAttribute('data-callout-row'), top: rect.top, bottom: rect.bottom };
+            });
+        }
         setDragRowId(t.id);
+        setDragGhost({ x: me.clientX, y: me.clientY, label: t.label || `Callout ${t.sequenceNumber ?? ''}` });
       }
-      if (!listRef.current) return;
-      const rows = Array.from(listRef.current.querySelectorAll('[data-callout-row]'));
-      let aft = null;
+      if (!started) return;
+      // Update ghost position
+      setDragGhost(g => g ? { ...g, x: me.clientX, y: me.clientY } : null);
+      // Compute drop target from snapshot
+      const rows = rowSnapshotRef.current ?? [];
+      let aft = null; // null = insert before first
       for (const row of rows) {
-        if (row.getAttribute('data-callout-row') === t.id) continue;
-        const rect = row.getBoundingClientRect();
-        if (me.clientY > (rect.top + rect.bottom) / 2) aft = row.getAttribute('data-callout-row');
+        const mid = (row.top + row.bottom) / 2;
+        if (me.clientY > mid) aft = row.id;
       }
-      currentDropAfterId = aft;
+      dragStateRef.current.dropAfterId = aft;
       setDropAfterId(aft);
     };
+
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       if (started) {
+        const { dropAfterId: aft } = dragStateRef.current;
         const ids = callouts.map(c => c.id).filter(id => id !== t.id);
-        const insertIdx = currentDropAfterId === null ? 0 : ids.indexOf(currentDropAfterId) + 1;
+        const insertIdx = aft === null ? 0 : ids.indexOf(aft) + 1;
         ids.splice(insertIdx, 0, t.id);
         onReorder?.(ids);
         setDragRowId(null);
         setDropAfterId(null);
+        setDragGhost(null);
+        rowSnapshotRef.current = null;
       } else {
         onSelect?.(t.id);
         onFlyTo?.(t);
@@ -4314,12 +4332,15 @@ const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColo
     window.addEventListener('pointerup', onUp);
   }, [callouts, onReorder, onSelect, onFlyTo, onOpen]);
 
+  // Keep ref in sync so onUp closure always reads current value without stale captures
+  useEffect(() => { dragStateRef.current.dropAfterId = dropAfterId; }, [dropAfterId]);
+
   const isHot = dragging || headerHovered;
   const left  = pos ? `${pos.left}px` : undefined;
   const top   = pos ? `${pos.top}px`  : panelTop;
   const right  = pos ? undefined : '8px';
 
-  return createPortal(
+  return [createPortal(
     <div style={{
       position: 'fixed', left, top, right, zIndex: 150, userSelect: 'none',
       transformOrigin: 'top right',
@@ -4413,7 +4434,35 @@ const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColo
       </div>
     </div>,
     document.body
-  );
+  ),
+
+  // Drag ghost pill — rendered into body, follows cursor
+  dragGhost && createPortal(
+    <div style={{
+      position: 'fixed',
+      left: dragGhost.x + 12,
+      top: dragGhost.y - 14,
+      maxWidth: '200px',
+      height: '28px',
+      background: 'var(--color-surface-content-default)',
+      border: '1px solid var(--color-border-default)',
+      borderRadius: '6px',
+      display: 'flex', alignItems: 'center', gap: '6px',
+      padding: '0 10px',
+      pointerEvents: 'none',
+      zIndex: 500,
+      boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
+      fontFamily: "'Inter', sans-serif",
+      fontSize: '12px',
+      color: 'var(--color-text-default)',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+    }}>
+      {dragGhost.label}
+    </div>,
+    document.body
+  ),
+  ];
 };
 
 const CalloutDropGap = () => (
