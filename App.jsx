@@ -8073,7 +8073,14 @@ export default function App() {
         open={calloutsOpen && annotationMode && activeTool === 'comment' && commentMode === 'callout'}
         onOpenChange={setCalloutsOpen}
         onFlyTo={handleFlyTo}
-        onRemove={(id) => setTooltips(prev => prev.filter(t => t.id !== id))}
+        onRemove={(id) => setTooltips(prev => {
+          const remaining = prev.filter(t => t.id !== id);
+          // Re-sequence callouts so numbers stay contiguous from 1
+          const callouts = [...remaining.filter(t => t.commentMode !== 'default')]
+            .sort((a, b) => (a.sequenceNumber ?? 999) - (b.sequenceNumber ?? 999));
+          callouts.forEach((t, i) => { t.sequenceNumber = i + 1; });
+          return remaining.map(t => t.commentMode !== 'default' ? ({ ...t, sequenceNumber: callouts.find(c => c.id === t.id)?.sequenceNumber ?? t.sequenceNumber }) : t);
+        })}
         onRename={(id, label) => setTooltips(prev => prev.map(t => t.id === id ? { ...t, label } : t))}
         onColorChange={(id, color) => handleUpdateTooltip(id, { color })}
         onSelect={(id) => { setDraggingId(prev => prev === id ? null : id); }}
