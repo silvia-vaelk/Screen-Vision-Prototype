@@ -4,7 +4,7 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Html, ContactShadows, Line, TransformControls, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { MessageSquare as NotesIcon, PenTool as SketchIcon, Check, X as XIcon, ChevronRight, Eye, EyeOff } from 'lucide-react';
+import { MessageSquare as NotesIcon, PenTool as SketchIcon, Check, X as XIcon, ChevronRight, Eye, EyeOff, Trash2 } from 'lucide-react';
 import LayersDrawer from './LayersDrawer.jsx';
 import BottomToolbar, { PALETTE as BTB_PALETTE, ThicknessControl } from './BottomToolbar.jsx';
 import { DS } from './tokens.js';
@@ -4414,8 +4414,6 @@ const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColo
                 editMode={editMode}
                 onPointerDown={(e) => handleRowPointerDown(e, t)}
                 onRemove={() => onRemove?.(t.id)}
-                onToggleHidden={() => onToggleHidden?.(t.id)}
-                onColorChange={(color) => onColorChange?.(t.id, color)}
                 onOpen={() => { onFlyTo?.(t); onOpen?.(t.id); }}
                 onHoverIn={() => onHover?.(t.id)}
                 onHoverOut={() => onHover?.(null)}
@@ -4468,21 +4466,9 @@ const CalloutDropGap = () => (
   <div style={{ height: '44px', background: 'var(--color-overlay-subtle)', flexShrink: 0, pointerEvents: 'none' }} />
 );
 
-const CalloutRow = ({ t, index, isHidden, isSelected, isDraggingThis, showDropAbove, showDropBelow, editMode, onPointerDown, onRemove, onToggleHidden, onColorChange, onOpen, onHoverIn, onHoverOut }) => {
+const CalloutRow = ({ t, index, isHidden, isSelected, isDraggingThis, showDropAbove, showDropBelow, editMode, onPointerDown, onRemove, onOpen, onHoverIn, onHoverOut }) => {
   const [hovered, setHovered] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const paletteRef = useRef(null);
-
-  useEffect(() => {
-    if (!paletteOpen) return;
-    const close = (e) => { if (paletteRef.current && !paletteRef.current.contains(e.target)) setPaletteOpen(false); };
-    document.addEventListener('pointerdown', close);
-    return () => document.removeEventListener('pointerdown', close);
-  }, [paletteOpen]);
-
   const pinColor = t.color || UI.gold;
-  const effectivelyOff = isHidden;
-  const showEye = hovered || isHidden;
 
   return (
     <div>
@@ -4501,64 +4487,35 @@ const CalloutRow = ({ t, index, isHidden, isSelected, isDraggingThis, showDropAb
             : hovered ? 'var(--color-overlay-subtle)'
             : 'transparent',
           transition: 'background 0.1s, opacity 0.18s ease',
-          opacity: isDraggingThis ? 0.28 : 1,
+          opacity: isDraggingThis ? 0.28 : isHidden ? 0.4 : 1,
           userSelect: 'none',
         }}
       >
-        {/* Coloured badge circle — matches scene pin */}
-        <div style={{ position: 'relative', flexShrink: 0 }} ref={paletteRef}>
-          <button
-            onPointerDown={e => e.stopPropagation()}
-            onClick={e => { e.stopPropagation(); setPaletteOpen(v => !v); }}
-            title="Change colour"
-            style={{ width: '22px', height: '22px', borderRadius: '50%', background: pinColor, border: '2px solid rgba(255,255,255,0.25)', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: effectivelyOff ? 0.4 : 1, transition: 'opacity 0.15s', color: '#fff', fontSize: '11px', fontWeight: 400, fontFamily: 'system-ui, sans-serif', boxShadow: '0 1px 4px rgba(0,0,0,0.3)' }}
-          >
-            {t.sequenceNumber ?? index + 1}
-          </button>
-          {paletteOpen && (
-            <div onPointerDown={e => e.stopPropagation()} style={{ position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%', transform: 'translateX(-50%)', background: '#19181A', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 8px', boxShadow: '0 8px 24px rgba(0,0,0,0.35)', zIndex: 300 }}>
-              {CALLOUT_PALETTE.map(c => {
-                const on = pinColor === c.value;
-                return (
-                  <button key={c.id} onPointerDown={e => { e.stopPropagation(); onColorChange?.(c.value); setPaletteOpen(false); }}
-                    style={{ width: '22px', height: '22px', borderRadius: '50%', background: c.value, border: on ? '2px solid #fff' : '2px solid rgba(255,255,255,0.18)', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: on ? 'scale(1.1)' : 'scale(1)', transition: 'transform 0.1s' }}>
-                    {on && <Check size={12} color="#fff" strokeWidth={2.6} />}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+        {/* Coloured badge circle — display only, no colour picker here */}
+        <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: pinColor, border: '2px solid rgba(255,255,255,0.25)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '11px', fontWeight: 400, fontFamily: 'system-ui, sans-serif', boxShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>
+          {t.sequenceNumber ?? index + 1}
         </div>
         {/* Label — clickable to open in scene */}
         <span
           title={t.label}
           onClick={e => { e.stopPropagation(); onOpen?.(); }}
-          style={{ flex: 1, fontSize: '14px', fontWeight: 400, color: 'var(--color-text-default)', fontFamily: "'Inter', sans-serif", lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: effectivelyOff ? 0.4 : 1, transition: 'opacity 0.15s, color 0.12s', cursor: 'pointer' }}
-          onMouseEnter={e => e.currentTarget.style.color = 'var(--color-text-default)'}
-          onMouseLeave={e => e.currentTarget.style.color = 'var(--color-text-default)'}
+          style={{ flex: 1, fontSize: '14px', fontWeight: 400, color: 'var(--color-text-default)', fontFamily: "'Inter', sans-serif", lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', transition: 'opacity 0.15s', cursor: 'pointer' }}
         >
           {t.label || `Callout ${index + 1}`}
         </span>
 
-        {/* Actions — fixed right position like LayersDrawer */}
-        <div onPointerDown={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: 'auto' }}>
-          {editMode && (
+        {/* Delete — visible on hover, edit mode only */}
+        {editMode && (
+          <div onPointerDown={e => e.stopPropagation()} style={{ flexShrink: 0 }}>
             <button onClick={e => { e.stopPropagation(); onRemove?.(); }} title="Delete"
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', color: 'var(--color-icon-subtle)', opacity: hovered ? 1 : 0, pointerEvents: hovered ? 'auto' : 'none', transition: 'color 0.12s, opacity 0.12s' }}
-              onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--color-text-danger, #e5484d)'}
               onMouseLeave={e => e.currentTarget.style.color = 'var(--color-icon-subtle)'}
             >
-              <XIcon size={16} />
+              <Trash2 size={15} />
             </button>
-          )}
-          <button onClick={e => { e.stopPropagation(); onToggleHidden?.(); }} title={isHidden ? 'Show' : 'Hide'}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', color: isHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)', opacity: showEye ? 1 : 0, pointerEvents: showEye ? 'auto' : 'none', transition: 'color 0.12s, opacity 0.12s' }}
-            onMouseEnter={e => { if (!isHidden) e.currentTarget.style.color = 'var(--color-icon-default)'; }}
-            onMouseLeave={e => { if (!isHidden) e.currentTarget.style.color = 'var(--color-icon-subtle)'; }}
-          >
-            {isHidden ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
-        </div>
+          </div>
+        )}
       </div>
       {showDropBelow && <CalloutDropGap />}
     </div>
