@@ -4414,8 +4414,12 @@ const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColo
             const isHidden = allHidden || hiddenIds?.has(t.id);
             const isSelected = selectedId === t.id;
             const isDraggingThis = dragRowId === t.id;
-            const showDropAbove = dragRowId && !isDraggingThis && dropAfterId === null && i === 0;
-            const showDropBelow = dragRowId && !isDraggingThis && dropAfterId === t.id;
+            // Suppress DropGap when drop would leave item in its current position
+            const dragIdx = callouts.findIndex(c => c.id === dragRowId);
+            const prevId = dragIdx > 0 ? callouts[dragIdx - 1].id : null;
+            const isNoOp = dropAfterId === prevId; // would land right back where it started
+            const showDropAbove = !isNoOp && dragRowId && !isDraggingThis && dropAfterId === null && i === 0;
+            const showDropBelow = !isNoOp && dragRowId && !isDraggingThis && dropAfterId === t.id;
             return (
               <CalloutRow
                 key={t.id} t={t} index={i}
