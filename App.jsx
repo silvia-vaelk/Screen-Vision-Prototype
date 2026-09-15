@@ -4,7 +4,7 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Html, ContactShadows, Line, TransformControls, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { MessageSquare as NotesIcon, PenTool as SketchIcon, Check, X as XIcon, ChevronRight, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { MessageSquare as NotesIcon, PenTool as SketchIcon, Check, X as XIcon, ChevronRight, MoreHorizontal, Eye, EyeOff, Trash2 } from 'lucide-react';
 import LayersDrawer from './LayersDrawer.jsx';
 import BottomToolbar, { PALETTE as BTB_PALETTE, ThicknessControl } from './BottomToolbar.jsx';
 import { DS } from './tokens.js';
@@ -163,6 +163,13 @@ const firstInitialFromAuthorOrLabel = (author, label) => {
 const shoeModelMeshes = { current: [] };
 // True while the selection gumball is hovered/dragged, so box-select doesn't also fire.
 const gizmoBusyRef = { current: false };
+// Screen-space (viewport px) position of the live cursor-projection dot, written every
+// frame by HoverPlacementDot (inside the Canvas) and read by the DOM-level callout ghost
+// line (outside the Canvas) — null while not hovering the model / tool not armed.
+const hoverProjection = { current: null };
+// DOM node of the top-dock callout number badge, so a click handler outside that
+// component can read its on-screen position as the drop animation's start point.
+const calloutDockAnchor = { current: null };
 
 /* ═══════════════════════════════════════════════════════════════════════════════
    FBX DROP ZONE — shown when no model is loaded yet
@@ -515,23 +522,37 @@ const LeaderLine = ({ surface, elevated, renderAbove, color = UI.purple }) => {
 
 /* Comment bubble (MODE A): circular speech-bubble with squared bottom-left corner,
    showing the first letter of the author's name. */
-const CommentBubble = ({ letter = '?', color = UI.purple, scale = 1, unseen = false }) => (
+const CommentBubble = ({ letter = '?', color = UI.purple, scale = 1, unseen = false, ringed = false }) => (
   <div style={{
     transform: `translate(0, -100%) scale(${scale})`, transformOrigin: 'left bottom',
     width: '30px', height: '30px',
     background: color, borderRadius: '50% 50% 50% 0',
     border: '2px solid #fff',
-    // Unseen comments get a bright white halo so they stand out at a glance.
-    boxShadow: unseen
-      ? '0 3px 12px rgba(0,0,0,0.35), 0 0 0 3px #ffffff, 0 0 10px 2px rgba(255,255,255,0.7)'
-      : '0 3px 12px rgba(0,0,0,0.35)',
+    // Unseen comments get a bright white halo; the expanded/selected pin gets an accent ring.
+    boxShadow: ringed
+      ? `0 3px 12px rgba(0,0,0,0.35), 0 0 0 2.5px #ffffff, 0 0 0 5px ${UI.purple}`
+      : unseen
+        ? '0 3px 12px rgba(0,0,0,0.35), 0 0 0 3px #ffffff, 0 0 10px 2px rgba(255,255,255,0.7)'
+        : '0 3px 12px rgba(0,0,0,0.35)',
+    transition: 'box-shadow 0.15s ease',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    color: DS.white, fontSize: '13px', fontWeight: 400, lineHeight: 1,
+    // Contrast-aware text colour — same rule as the callout badges (CALLOUT_PALETTE /
+    // badgeTextColor), so an author's colour reads correctly whether it's dark (e.g.
+    // Blueberry) or light (e.g. Mango, Mint), and matches the expanded thread's avatar exactly.
+    color: badgeTextColor(color), fontSize: '13px', fontWeight: 400, lineHeight: 1,
     fontFamily: "system-ui, sans-serif",
   }}>{letter}</div>
 );
 
-const ClickMarker = ({ point, nextNumber, commentMode = 'callout', color = UI.purple }) => {
+const ClickMarker = ({ point, nextNumber, commentMode = 'callout', color = UI.purple, authorLetter = '?', onCommitLabel, onCancel }) => {
+  // Quick-add label — same pill CalloutBadge shows on hover for an existing pin (~line
+  // 791), just editable: typing + Enter commits and drops back to the plain badge instead
+  // of opening the full label/description panel; that only appears the next time this
+  // pin is clicked, once it's a real tooltip.
+  const [quickLabel, setQuickLabel] = useState('');
+  const quickInputRef = useRef(null);
+  useEffect(() => { setTimeout(() => quickInputRef.current?.focus(), 50); }, []);
+
   if (!point) return null;
   // surface = immutable raycast hit; elevated = badge position (may have been moved by user)
   const surface = [point.surfaceX ?? point.x, point.surfaceY ?? point.y, point.surfaceZ ?? point.z];
@@ -541,24 +562,54 @@ const ClickMarker = ({ point, nextNumber, commentMode = 'callout', color = UI.pu
   if (commentMode === 'default') {
     return (
       <Html position={surface} zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
-        <CommentBubble letter="?" color={color} />
+        <CommentBubble letter={authorLetter} color={color} />
       </Html>
     );
   }
 
-  // MODE B (callout) — leader line + dot + elevated badge
+  const commit = () => onCommitLabel?.(quickLabel.trim());
+
+  // MODE B (callout) — leader line + dot + elevated badge + quick-add label pill
   return (
     <>
       <LeaderLine surface={surface} elevated={elevated} renderAbove={false} color={color} />
-      <Html position={elevated} zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
-        <div style={{
-          width: '28px', height: '28px', borderRadius: '50%', background: color,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transform: 'translate(-50%, -50%)',
-          boxShadow: `0 2px 12px rgba(0,0,0,0.3), 0 0 0 2.5px #ffffff`,
-          color: DS.white, fontSize: '13px', fontWeight: 400, fontFamily: 'system-ui, sans-serif',
-        }}>
-          {nextNumber ?? '?'}
+      <Html position={elevated} zIndexRange={[20, 0]} style={{ overflow: 'visible' }}>
+        <div style={{ position: 'relative', width: '28px', height: '28px', pointerEvents: 'none' }}>
+          <div style={{
+            width: '28px', height: '28px', borderRadius: '50%', background: color,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transform: 'translate(-50%, -50%)',
+            boxShadow: `0 2px 12px rgba(0,0,0,0.3), 0 0 0 2.5px #ffffff`,
+            color: DS.white, fontSize: '13px', fontWeight: 400, fontFamily: 'system-ui, sans-serif',
+          }}>
+            {nextNumber ?? '?'}
+          </div>
+          <div
+            onPointerDown={e => e.stopPropagation()}
+            style={{
+              position: 'absolute', left: 'calc(50% + 8px)', top: 0, transform: 'translateY(-50%)', height: '28px',
+              display: 'flex', alignItems: 'center',
+              background: 'var(--color-surface-content-default)', border: '1px solid var(--color-border-default)',
+              borderRadius: '14px', padding: '0 12px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+              pointerEvents: 'auto', animation: 'calloutFadeIn 0.12s ease',
+            }}
+          >
+            <input
+              ref={quickInputRef}
+              value={quickLabel}
+              onChange={e => setQuickLabel(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { e.preventDefault(); commit(); }
+                if (e.key === 'Escape') onCancel?.();
+              }}
+              placeholder="Add a pin"
+              style={{
+                border: 'none', outline: 'none', background: 'transparent',
+                color: 'var(--color-text-default)', fontSize: '12px', fontFamily: DS.font,
+                width: '130px', padding: 0,
+              }}
+            />
+          </div>
         </div>
       </Html>
     </>
@@ -660,19 +711,21 @@ const CalloutBadge = ({ t, badgeDivRef, onPointerDown, isSelected, pinIconOpen, 
       <div
         onPointerDown={onPointerDown}
         style={{
-          width: '28px', height: '28px', borderRadius: '50%',
+          width: '22px', height: '22px', borderRadius: '50%',
           background: pinColor,
+          border: '2px solid rgba(255,255,255,0.25)',
+          boxSizing: 'border-box',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           transform: 'translate(-50%, -50%)',
           cursor: 'grab',
-          color: '#fff', fontSize: '13px', fontWeight: 400, fontFamily: 'system-ui, sans-serif',
+          color: badgeTextColor(pinColor), fontSize: '12px', fontWeight: 500, fontFamily: UI.font, lineHeight: '16px', textTransform: 'uppercase',
           boxShadow: isExpanded
             ? `0 4px 20px rgba(0,0,0,0.5), 0 0 0 2.5px #ffffff, 0 0 0 5px ${pinColor}`
             : !seen
               ? `0 2px 12px rgba(0,0,0,0.4), 0 0 0 2.5px #ffffff, 0 0 10px 2px rgba(255,255,255,0.6)`
               : hasCam && !editMode
                 ? `0 2px 12px rgba(0,0,0,0.4), 0 0 0 2px ${pinColor}99`
-                : `0 2px 12px rgba(0,0,0,0.4), 0 0 0 1.5px ${pinColor}55`,
+                : 'none',
           transition: 'box-shadow 0.15s ease',
           position: 'relative', zIndex: 2,
         }}
@@ -793,7 +846,7 @@ const CalloutBadge = ({ t, badgeDivRef, onPointerDown, isSelected, pinIconOpen, 
   );
 };
 
-const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, expandedId, onSetExpanded, onPinViewed, onUpdatePin, seen = true, highlighted = false }) => {
+const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, expandedId, onSetExpanded, onPinViewed, onPinUnviewed, onUpdatePin, onRemove, currentUser, seen = true, highlighted = false }) => {
   const { camera, gl } = useThree();
   const lineGroupRef  = useRef();   // Three.js group — set .visible imperatively
   const badgeDivRef   = useRef();   // HTML div for badge  — set style.visibility
@@ -803,6 +856,7 @@ const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, ex
   renderAboveRef.current = renderAbove;
   // Suppress occlusion while a drag is in progress so the pin stays visible
   const dragActiveRef = useRef(false);
+  const [bubbleHovered, setBubbleHovered] = useState(false); // default-mode hover preview card
 
   useFrame(() => {
     if (dragActiveRef.current) return;
@@ -845,6 +899,23 @@ const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, ex
   // Legacy comments (no commentMode stamp) render as callouts to preserve old data
   const mode     = t.commentMode === 'default' ? 'default' : 'callout';
   const pinColor = t.color || UI.purple;
+  // Suppress hover previews everywhere while *any* comment thread is open — not just this
+  // one — so other pins don't pop up their own cards over/around an already-open panel.
+  const showPreview = mode === 'default' && bubbleHovered && !isExpanded && expandedId == null;
+
+  // drei's <Html zIndexRange> only recomputes el.style.zIndex on frames where the projected
+  // screen position or camera zoom actually changed (see Html.js's useFrame — the update is
+  // gated behind that check for perf). Opening/closing a thread or hovering a pin changes
+  // neither, so passing a boosted zIndexRange prop alone never reaches the DOM — the element
+  // keeps whatever z-index drei last computed under the *previous* range. Set it ourselves,
+  // imperatively, the moment the boost state changes; drei's own per-frame calc still owns it
+  // the rest of the time (e.g. once the camera moves again after collapsing).
+  useEffect(() => {
+    if (mode !== 'default') return;
+    const el = badgeDivRef.current?.parentElement?.parentElement;
+    if (!el) return;
+    el.style.zIndex = (showPreview || isExpanded) ? '1000' : '';
+  }, [mode, showPreview, isExpanded]);
 
   // ── Badge drag: free movement on camera-facing plane ──────────────────────
   const handleBadgePointerDown = (e) => {
@@ -932,12 +1003,104 @@ const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, ex
   // ── MODE A (default): Figma-style bubble pinned at the surface point ───────
   if (mode === 'default') {
     const authorLetter = (t.author || '?')[0].toUpperCase();
+    const replyCount = (t.replies || []).length;
+    // drei's Html depth-sorts every pin by distance-to-camera within [38,0] by default (higher
+    // = frontmost, standard CSS z-index), which can put a *different* pin's DOM node above this
+    // one's preview/panel when two pins sit close together (as our sample data does) — making
+    // clicks land on the wrong pin, and other pins visibly draw over the expanded panel. Force
+    // this instance to the very front — with a range clearly *above* the default [38,0] ceiling
+    // (a range like [1,0] does the opposite: it caps this instance at z-index 1, pinning it
+    // *behind* every ordinary pin, which is the bug this was meant to fix). The imperative
+    // effect above covers the moment this toggles; this range keeps it correct once drei's
+    // own per-frame calc takes back over (e.g. after the camera moves).
+    const zRange = (showPreview || isExpanded) ? [1000, 999] : [38, 0];
     return (
-      <Html position={surface} zIndexRange={[38, 0]} style={{ overflow: 'visible' }}>
-        <div ref={badgeDivRef} style={{ position: 'relative', pointerEvents: 'auto' }}>
-          <div onPointerDown={handleBubblePointerDown} style={{ cursor: 'grab' }}>
-            <CommentBubble letter={authorLetter} color={pinColor} scale={(isSelected || pinIconOpen) ? 1.18 : 1} unseen={!seen} />
+      <Html position={surface} zIndexRange={zRange} style={{ overflow: 'visible' }}>
+        <div
+          ref={badgeDivRef}
+          style={{ position: 'relative', pointerEvents: 'auto' }}
+          onMouseEnter={() => setBubbleHovered(true)}
+          onMouseLeave={() => setBubbleHovered(false)}
+        >
+          {/* Compact pin — the shared anchor point. Fades out as the hover preview grows in
+              from the same corner, and gains an accent ring while the thread is expanded. */}
+          <div
+            onPointerDown={handleBubblePointerDown}
+            style={{
+              cursor: 'grab',
+              opacity: showPreview ? 0 : 1,
+              pointerEvents: showPreview ? 'none' : 'auto',
+              transition: 'opacity 0.15s ease',
+            }}
+          >
+            <CommentBubble letter={authorLetter} color={pinColor} scale={(isSelected || pinIconOpen) ? 1.18 : 1} unseen={!seen} ringed={isExpanded} />
           </div>
+
+          {/* Hover preview — anchored with the exact same transform recipe as the pin itself
+              (translate(0,-100%) from transform-origin 'left bottom', on a box positioned at
+              left:0/top:0). Using `bottom:0` here instead — which measures against the
+              *parent's own box-model height* (the untransformed pin's ~30px, since transforms
+              don't affect layout) — put the card ~30px away from where the pin actually
+              renders. That gap was a dead zone the cursor fell into mid-grow, which is what
+              was causing the hover flicker as much as (or more than) the pointer-events gap. */}
+          <div
+            onPointerDown={e => { e.stopPropagation(); e.nativeEvent?.stopImmediatePropagation(); }}
+            onClick={() => {
+              // Always expands, regardless of tool/editMode. handleBubblePointerDown (the
+              // compact pin's own click, used outside of hover) branches on editMode — select
+              // vs expand — because editMode is also "comment tool active", and that branch
+              // was written to let you select/drag a pin while placing new ones. But the hover
+              // card only ever appears to let you read → open a comment, so it should expand
+              // every time regardless of which tool is currently selected.
+              onFlyTo(t); onSetExpanded(isExpanded ? null : t.id); onPinViewed?.(t.id);
+            }}
+            style={{
+              position: 'absolute', left: 0, top: 0,
+              transformOrigin: 'left bottom',
+              transform: showPreview ? 'translate(0,-100%) scale(1)' : 'translate(0,-100%) scale(0.35)',
+              opacity: showPreview ? 1 : 0,
+              transition: 'transform 0.18s cubic-bezier(0.22,1,0.36,1), opacity 0.14s ease',
+              width: '220px', background: COMMENT_THEME.bg, border: `1px solid ${COMMENT_THEME.border}`,
+              borderRadius: '12px 12px 12px 4px', boxShadow: COMMENT_THEME.shadow,
+              padding: '10px 12px', cursor: 'pointer',
+              pointerEvents: showPreview ? 'auto' : 'none', zIndex: 40,
+            }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+              <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: pinColor, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: badgeTextColor(pinColor), fontSize: '10px', fontWeight: 600, fontFamily: 'system-ui, sans-serif' }}>{authorLetter}</div>
+              <span style={{ fontSize: '12px', fontWeight: 500, color: COMMENT_THEME.text, fontFamily: UI.font, lineHeight: '16px' }}>{t.author}</span>
+              <span style={{ fontSize: '12px', fontWeight: 400, color: COMMENT_THEME.textDim, fontFamily: UI.font, lineHeight: '16px' }}>{formatTimeAgo(t.created)}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '12px', fontWeight: 400, color: COMMENT_THEME.text, fontFamily: UI.font, lineHeight: '16px', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{t.description}</p>
+            {replyCount > 0 && (
+              <div style={{ marginTop: '4px', fontSize: '12px', fontWeight: 400, color: COMMENT_THEME.textDim, fontFamily: UI.font, lineHeight: '16px' }}>{replyCount} {replyCount === 1 ? 'reply' : 'replies'}</div>
+            )}
+          </div>
+
+          {/* Expanded thread — docked directly beside the (now compact + ringed) pin,
+              so both are visible next to each other rather than a separate floating window. */}
+          {isExpanded && (
+            <div style={{ position: 'absolute', left: 'calc(100% + 8px)', top: 0, transform: 'translate(0,-100%)', zIndex: 45 }}>
+              <CommentDetailPopup
+                tooltip={t}
+                onClose={() => {
+                  onSetExpanded(null);
+                  // The cursor is almost always still sitting somewhere over the wrapper
+                  // when Close is clicked (the panel is docked right beside the pin), so
+                  // bubbleHovered never got a mouseleave to clear it. Without resetting it
+                  // here, showPreview (bubbleHovered && !isExpanded) flips true the instant
+                  // isExpanded does, popping the hover card right back up instead of
+                  // settling on the plain default pin.
+                  setBubbleHovered(false);
+                }}
+                onUpdate={onUpdatePin}
+                onDelete={() => { onRemove?.(t.id); onSetExpanded(null); }}
+                currentUser={currentUser}
+                isSeen={seen}
+                onMarkUnread={() => onPinUnviewed?.(t.id)}
+                onMarkSeen={() => onPinViewed?.(t.id)}
+              />
+            </div>
+          )}
         </div>
       </Html>
     );
@@ -987,7 +1150,7 @@ const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, ex
   );
 };
 
-const TooltipPins = ({ tooltips, selectedId, onSelect, editMode, onFlyTo, expandedId, onSetExpanded, onPinViewed, renderAbove, onUpdatePin, isPinSeen, highlightedId }) => {
+const TooltipPins = ({ tooltips, selectedId, onSelect, editMode, onFlyTo, expandedId, onSetExpanded, onPinViewed, onPinUnviewed, renderAbove, onUpdatePin, onRemove, currentUser, isPinSeen, highlightedId }) => {
   // Render selected/expanded pin last so it appears above others
   const sorted = [...tooltips].sort((a, b) => {
     const aTop = a.id === selectedId || a.id === expandedId ? 1 : 0;
@@ -1000,7 +1163,8 @@ const TooltipPins = ({ tooltips, selectedId, onSelect, editMode, onFlyTo, expand
       selectedId={selectedId} onSelect={onSelect}
       editMode={editMode} onFlyTo={onFlyTo}
       expandedId={expandedId} onSetExpanded={onSetExpanded}
-      onPinViewed={onPinViewed} onUpdatePin={onUpdatePin}
+      onPinViewed={onPinViewed} onPinUnviewed={onPinUnviewed} onUpdatePin={onUpdatePin}
+      onRemove={onRemove} currentUser={currentUser}
       seen={isPinSeen ? isPinSeen(t.id) : true}
       highlighted={highlightedId === t.id}
     />
@@ -1010,118 +1174,211 @@ const TooltipPins = ({ tooltips, selectedId, onSelect, editMode, onFlyTo, expand
 /* ═══════════════════════════════════════════════════════════════════════════════
    COMMENT DETAIL POPUP — draggable popup shown when a pin is clicked
    ═══════════════════════════════════════════════════════════════════════════════ */
-const CommentDetailPopup = ({ tooltip, onClose, onUpdate, currentUser }) => {
-  const [pos, setPos] = useState({ x: window.innerWidth / 2 - 150, y: 140 });
-  const isDragging = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0, px: 0, py: 0 });
-  const [dragging, setDragging] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const paletteRef = useRef(null);
-  const isCallout = tooltip.commentMode !== 'default';
-  const pinColor = tooltip.color || UI.purple;
+const formatTimeAgo = (ts) => {
+  if (!ts) return '';
+  const diff = Date.now() - ts;
+  const min = 60000, hr = 3600000, day = 86400000;
+  if (diff < min) return 'Just now';
+  if (diff < hr) return `${Math.floor(diff / min)}m ago`;
+  if (diff < day) return `${Math.floor(diff / hr)}h ago`;
+  if (diff < day * 7) return `${Math.floor(diff / day)}d ago`;
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
 
+// Theme-aware tokens for the comment hover-card / thread panel family — these follow the
+// app's own light/dark mode toggle (same CSS vars the rest of the UI uses), not a fixed palette.
+const COMMENT_THEME = {
+  bg: UI.glass,
+  border: UI.glassBorder,
+  shadow: UI.panelShadow,
+  text: UI.text,
+  textDim: UI.textMid,
+  iconDim: UI.textMid,
+  iconHover: UI.text,
+  pillBg: UI.bgRow,
+  danger: UI.red,
+};
+
+const SendArrowIcon = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+);
+
+/* One message row within a comment thread — the root comment or a reply.
+   Own messages (author === currentUser) get a hover-revealed •••  Edit/Delete menu. */
+const ThreadMessage = ({ author, text, created, color, isOwn, onEdit, onDelete }) => {
+  const [hovered, setHovered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(text);
+  const menuRef = useRef(null);
+  const initial = (author || '?')[0].toUpperCase();
+
+  useEffect(() => setVal(text), [text]);
   useEffect(() => {
-    if (!paletteOpen) return;
-    const close = (e) => { if (paletteRef.current && !paletteRef.current.contains(e.target)) setPaletteOpen(false); };
+    if (!menuOpen) return;
+    const close = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
     document.addEventListener('pointerdown', close);
     return () => document.removeEventListener('pointerdown', close);
-  }, [paletteOpen]);
+  }, [menuOpen]);
 
-  const handleDragStart = (e) => {
-    if (e.button !== 0) return;
-    isDragging.current = true; setDragging(true);
-    dragStart.current = { x: e.clientX, y: e.clientY, px: pos.x, py: pos.y };
-    e.preventDefault();
-    const onMove = (me) => {
-      if (!isDragging.current) return;
-      setPos({
-        x: Math.max(8, Math.min(window.innerWidth - 308, dragStart.current.px + me.clientX - dragStart.current.x)),
-        y: Math.max(54, Math.min(window.innerHeight - 80, dragStart.current.py + me.clientY - dragStart.current.y)),
-      });
-    };
-    const onUp = () => { isDragging.current = false; setDragging(false); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
-    window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
-  };
-
-  const BDR = '1px solid rgba(255,255,255,0.08)';
-  const inputStyle = {
-    width: '100%', boxSizing: 'border-box', background: 'transparent',
-    border: 'none', outline: 'none', fontFamily: UI.font, color: '#fff',
-    resize: 'none', lineHeight: '1.55',
+  const commitEdit = () => {
+    const trimmed = val.trim();
+    if (trimmed && trimmed !== text) onEdit?.(trimmed);
+    setEditing(false);
   };
 
   return (
-    <div style={{
-      position: 'fixed', left: pos.x, top: pos.y, zIndex: 55,
-      width: '300px', background: 'rgba(28,28,32,0.97)',
-      border: '1px solid rgba(255,255,255,0.10)',
-      borderRadius: UI.radius, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
-      backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-      fontFamily: UI.font, overflow: 'visible',
-    }}>
-      {/* Header — drag handle */}
-      <div onPointerDown={handleDragStart} style={{
-        padding: '10px 12px', borderBottom: BDR,
-        display: 'flex', alignItems: 'center', gap: '8px',
-        cursor: dragging ? 'grabbing' : 'grab', userSelect: 'none',
-      }}>
-        {/* Badge / colour swatch */}
-        <div ref={paletteRef} style={{ position: 'relative', flexShrink: 0 }}>
-          <div
-            onPointerDown={e => { if (!isCallout) return; e.stopPropagation(); }}
-            onClick={e => { if (!isCallout) return; e.stopPropagation(); setPaletteOpen(v => !v); }}
-            style={{
-              width: '24px', height: '24px', borderRadius: '50%', background: pinColor,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-              cursor: isCallout ? 'pointer' : 'default',
-              boxShadow: isCallout ? '0 0 0 1.5px rgba(255,255,255,0.25)' : 'none',
-            }}
-          >
-            <span style={{ fontSize: '9px', fontWeight: '700', color: '#fff' }}>{tooltip.sequenceNumber || '?'}</span>
-          </div>
-          {paletteOpen && (
-            <div onPointerDown={e => e.stopPropagation()} style={{
-              position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%', transform: 'translateX(-50%)',
-              background: '#19181A', borderRadius: '10px', display: 'flex', alignItems: 'center',
-              gap: '4px', padding: '6px 8px', boxShadow: '0 8px 24px rgba(0,0,0,0.45)', zIndex: 300,
-            }}>
-              {CALLOUT_PALETTE.map(c => {
-                const on = pinColor === c.value;
-                return (
-                  <button key={c.id}
-                    onPointerDown={e => { e.stopPropagation(); onUpdate(tooltip.id, { color: c.value }); setPaletteOpen(false); }}
-                    style={{ width: '22px', height: '22px', borderRadius: '50%', background: c.value, border: on ? '2px solid #fff' : '2px solid rgba(255,255,255,0.18)', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: on ? 'scale(1.1)' : 'scale(1)', transition: 'transform 0.1s' }}>
-                    {on && <Check size={12} color="#fff" strokeWidth={2.6} />}
-                  </button>
-                );
-              })}
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ display: 'flex', gap: '8px', padding: '10px 14px' }}
+    >
+      <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: color, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: badgeTextColor(color), fontSize: '11px', fontWeight: 600, fontFamily: UI.font }}>
+        {initial}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: COMMENT_THEME.text, fontFamily: UI.font }}>{author}</span>
+          <span style={{ fontSize: '11px', color: COMMENT_THEME.textDim, fontFamily: UI.font }}>{formatTimeAgo(created)}</span>
+          {isOwn && (
+            <div ref={menuRef} style={{ position: 'relative', marginLeft: 'auto', opacity: hovered || menuOpen ? 1 : 0, transition: 'opacity 0.12s' }}>
+              <button onClick={() => setMenuOpen(v => !v)} style={{ background: 'none', border: 'none', color: COMMENT_THEME.iconDim, cursor: 'pointer', padding: '2px', display: 'flex' }}
+                onMouseEnter={e => e.currentTarget.style.color = COMMENT_THEME.iconHover} onMouseLeave={e => e.currentTarget.style.color = COMMENT_THEME.iconDim}
+              ><MoreHorizontal size={14} /></button>
+              {menuOpen && (
+                <div style={{ position: 'absolute', top: '100%', right: 0, background: '#fff', borderRadius: '8px', padding: '4px', minWidth: '100px', boxShadow: COMMENT_THEME.shadow, border: `1px solid ${COMMENT_THEME.border}`, zIndex: 20 }}>
+                  <div onClick={() => { setEditing(true); setMenuOpen(false); }} style={{ padding: '6px 10px', borderRadius: '5px', fontSize: '12px', color: COMMENT_THEME.text, cursor: 'pointer', fontFamily: UI.font }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,0,0,0.05)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >Edit</div>
+                  <div onClick={() => { setMenuOpen(false); onDelete?.(); }} style={{ padding: '6px 10px', borderRadius: '5px', fontSize: '12px', color: COMMENT_THEME.danger, cursor: 'pointer', fontFamily: UI.font }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,0,0,0.05)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >Delete</div>
+                </div>
+              )}
             </div>
           )}
         </div>
-        {/* Editable label */}
-        <input
-          value={tooltip.label || ''}
-          onChange={e => onUpdate(tooltip.id, { label: e.target.value })}
-          onPointerDown={e => e.stopPropagation()}
-          placeholder="Label…"
-          style={{ ...inputStyle, flex: 1, fontSize: '13px', fontWeight: '600', padding: 0, minWidth: 0 }}
-        />
-        <button onClick={onClose} onPointerDown={e => e.stopPropagation()}
-          style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: '2px', borderRadius: '5px', lineHeight: 1, flexShrink: 0, display: 'flex' }}
-          onMouseEnter={e => e.currentTarget.style.color = '#fff'}
-          onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.4)'}
-        ><XIcon size={16} /></button>
+        {editing ? (
+          <textarea
+            autoFocus value={val} onChange={e => setVal(e.target.value)} onBlur={commitEdit}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitEdit(); } if (e.key === 'Escape') { setVal(text); setEditing(false); } }}
+            rows={2}
+            style={{ width: '100%', boxSizing: 'border-box', background: COMMENT_THEME.pillBg, border: 'none', borderRadius: '6px', outline: 'none', resize: 'none', color: COMMENT_THEME.text, fontFamily: UI.font, fontSize: '13px', lineHeight: '1.5', padding: '6px 8px', marginTop: '2px' }}
+          />
+        ) : (
+          <p style={{ margin: '2px 0 0', fontSize: '13px', color: COMMENT_THEME.text, fontFamily: UI.font, lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{text}</p>
+        )}
       </div>
-      {/* Editable description */}
-      <div style={{ padding: '12px 14px' }}>
-        <textarea
-          value={tooltip.description || ''}
-          onChange={e => onUpdate(tooltip.id, { description: e.target.value })}
-          onPointerDown={e => e.stopPropagation()}
-          placeholder="Add a description…"
-          rows={3}
-          style={{ ...inputStyle, fontSize: '13px', padding: 0, color: '#fff' }}
+    </div>
+  );
+};
+
+/* Anchored comment thread panel — docked beside its pin (see PinLeader), not a free-floating window. */
+const CommentDetailPopup = ({ tooltip, onClose, onUpdate, onDelete, currentUser, isSeen, onMarkUnread, onMarkSeen }) => {
+  const [reply, setReply] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+  const pinColor = tooltip.color || UI.purple;
+  const replies = tooltip.replies || [];
+  const currentInitial = (currentUser || 'Y')[0].toUpperCase();
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [menuOpen]);
+
+  // Click-outside-closes: the panel's own root already stops pointerdown propagation (below),
+  // and so does the pin's compact-badge click handler — so any pointerdown that actually
+  // reaches document here is, by construction, outside both. No contains() check needed.
+  useEffect(() => {
+    document.addEventListener('pointerdown', onClose);
+    return () => document.removeEventListener('pointerdown', onClose);
+  }, [onClose]);
+
+  const sendReply = () => {
+    const trimmed = reply.trim();
+    if (!trimmed) return;
+    onUpdate(tooltip.id, { replies: [...replies, { id: Date.now(), author: currentUser || 'You', text: trimmed, created: Date.now() }] });
+    setReply('');
+  };
+
+  const iconBtnStyle = (active) => ({
+    display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px',
+    border: 'none', background: active ? 'rgba(0,0,0,0.08)' : 'none', borderRadius: '6px',
+    color: active ? COMMENT_THEME.iconHover : COMMENT_THEME.iconDim, cursor: 'pointer', padding: 0,
+  });
+
+  return (
+    <div onPointerDown={e => e.stopPropagation()} style={{
+      width: '300px', maxHeight: '70vh', background: COMMENT_THEME.bg,
+      border: `1px solid ${COMMENT_THEME.border}`,
+      borderRadius: UI.radius, boxShadow: COMMENT_THEME.shadow,
+      fontFamily: UI.font, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    }}>
+      {/* Header — title, overflow menu (mark unread), resolve, close */}
+      <div style={{
+        padding: '10px 8px 10px 14px', borderBottom: `1px solid ${COMMENT_THEME.border}`,
+        display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0, userSelect: 'none',
+      }}>
+        <span style={{ fontSize: '13px', fontWeight: 600, color: COMMENT_THEME.text, fontFamily: UI.font, flex: 1 }}>Comment</span>
+        <div ref={menuRef} style={{ position: 'relative' }}>
+          <button onClick={() => setMenuOpen(v => !v)} title="More"
+            style={iconBtnStyle(menuOpen)}
+          ><MoreHorizontal size={15} /></button>
+          {menuOpen && (
+            <div style={{ position: 'absolute', top: '100%', right: 0, background: COMMENT_THEME.bg, borderRadius: '8px', padding: '4px', minWidth: '140px', boxShadow: COMMENT_THEME.shadow, border: `1px solid ${COMMENT_THEME.border}`, zIndex: 20 }}>
+              <div onClick={() => { setMenuOpen(false); isSeen ? onMarkUnread?.() : onMarkSeen?.(); }} style={{ padding: '6px 10px', borderRadius: '5px', fontSize: '12px', color: COMMENT_THEME.text, cursor: 'pointer', fontFamily: UI.font }}
+                onMouseEnter={e => e.currentTarget.style.background = COMMENT_THEME.pillBg} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >{isSeen ? 'Mark as unread' : 'Mark as read'}</div>
+            </div>
+          )}
+        </div>
+        <button onClick={() => onUpdate(tooltip.id, { resolved: !tooltip.resolved })} title={tooltip.resolved ? 'Mark as unresolved' : 'Mark as resolved'}
+          style={iconBtnStyle(tooltip.resolved)}
+        ><Check size={15} /></button>
+        <button onClick={onClose} title="Close"
+          style={iconBtnStyle(false)}
+        ><XIcon size={15} /></button>
+      </div>
+
+      {/* Thread — root comment + replies */}
+      <div style={{ overflowY: 'auto', flex: 1 }}>
+        <ThreadMessage
+          author={tooltip.author} text={tooltip.description || ''} created={tooltip.created} color={pinColor}
+          isOwn={tooltip.author === currentUser}
+          onEdit={(text) => onUpdate(tooltip.id, { description: text })}
+          onDelete={onDelete}
         />
+        {replies.map(r => (
+          <ThreadMessage
+            key={r.id} author={r.author} text={r.text} created={r.created} color={pinColor}
+            isOwn={r.author === currentUser}
+            onEdit={(text) => onUpdate(tooltip.id, { replies: replies.map(x => x.id === r.id ? { ...x, text } : x) })}
+            onDelete={() => onUpdate(tooltip.id, { replies: replies.filter(x => x.id !== r.id) })}
+          />
+        ))}
+      </div>
+
+      {/* Reply composer — pill input, current user's avatar, circular send arrow */}
+      <div style={{ borderTop: `1px solid ${COMMENT_THEME.border}`, padding: '10px 12px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: pinColor, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: badgeTextColor(pinColor), fontSize: '11px', fontWeight: 600, fontFamily: UI.font }}>
+          {currentInitial}
+        </div>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '6px', background: COMMENT_THEME.pillBg, borderRadius: '999px', padding: '6px 6px 6px 12px' }}>
+          <input
+            value={reply} onChange={e => setReply(e.target.value)} onPointerDown={e => e.stopPropagation()}
+            placeholder="Reply"
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); sendReply(); } }}
+            style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', color: COMMENT_THEME.text, fontFamily: UI.font, fontSize: '13px' }}
+          />
+          <button onClick={sendReply} disabled={!reply.trim()} title="Send reply"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px', borderRadius: '50%', border: 'none', flexShrink: 0, background: reply.trim() ? UI.purple : '#e2e2e4', color: reply.trim() ? '#fff' : COMMENT_THEME.textDim, cursor: reply.trim() ? 'pointer' : 'default', padding: 0, transition: 'background 0.15s' }}
+          >
+            <SendArrowIcon />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1507,42 +1764,29 @@ const AddTooltipPanel = ({ point, onAdd, onClear, onUpdatePoint, nextNumber }) =
    ═══════════════════════════════════════════════════════════════════════════════ */
 const CommentFloatingPanel = ({ point, onAdd, onClear, nextNumber, currentUser }) => {
   const [description, setDescription] = useState('');
+  // Anchored the same way the eventual bubble's hover-preview / thread panel are (see
+  // PinLeader): a fixed offset to the RIGHT of the marker's own screen point, growing
+  // upward from that same Y via translateY(-100%) — same relationship, so the composer
+  // never overlaps the marker no matter where on screen the click landed.
   const clampX = (raw) => Math.max(8, Math.min(raw, window.innerWidth - 308));
   const [pos, setPos] = useState(() => ({
-    x: clampX((point?.screenX ?? window.innerWidth / 2) + 20),
-    y: Math.max(60, (point?.screenY ?? window.innerHeight / 2) - 80),
+    x: clampX((point?.screenX ?? window.innerWidth / 2) + 24),
+    y: Math.max(60, point?.screenY ?? window.innerHeight / 2),
   }));
-  const isDragging = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0, px: 0, py: 0 });
-  const [dragging, setDragging] = useState(false);
+  const taRef = useRef(null);
 
-  useEffect(() => { setDescription(''); }, [point]);
+  useEffect(() => { setDescription(''); setTimeout(() => taRef.current?.focus(), 50); }, [point]);
   useEffect(() => {
     if (point) setPos({
-      x: Math.max(8, Math.min((point.screenX ?? window.innerWidth / 2) + 20, window.innerWidth - 308)),
-      y: Math.max(60, (point.screenY ?? window.innerHeight / 2) - 80),
+      x: clampX((point.screenX ?? window.innerWidth / 2) + 24),
+      y: Math.max(60, point.screenY ?? window.innerHeight / 2),
     });
   }, [point?.screenX, point?.screenY]);
 
   if (!point) return null;
 
-  const handleDragStart = (e) => {
-    if (e.button !== 0) return;
-    isDragging.current = true; setDragging(true);
-    dragStart.current = { x: e.clientX, y: e.clientY, px: pos.x, py: pos.y };
-    e.preventDefault();
-    const onMove = (me) => {
-      if (!isDragging.current) return;
-      setPos({
-        x: Math.max(8, Math.min(window.innerWidth - 308, dragStart.current.px + me.clientX - dragStart.current.x)),
-        y: Math.max(0, Math.min(window.innerHeight - 60, dragStart.current.py + me.clientY - dragStart.current.y)),
-      });
-    };
-    const onUp = () => { isDragging.current = false; setDragging(false); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
-    window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
-  };
-
   const handleAdd = () => {
+    if (!description.trim()) return;
     const autoLabel = `Comment ${nextNumber ?? 1}`;
     onAdd({ ...point, label: autoLabel, description, details: [], id: Date.now(), created: Date.now(), author: currentUser || 'You' });
     setDescription('');
@@ -1550,35 +1794,36 @@ const CommentFloatingPanel = ({ point, onAdd, onClear, nextNumber, currentUser }
 
   return (
     <div style={{
-      position: 'fixed', left: pos.x, top: pos.y, zIndex: 45,
+      position: 'fixed', left: pos.x, top: pos.y, transform: 'translateY(-100%)', zIndex: 45,
       width: '280px', background: UI.glass, border: `1px solid ${UI.glassBorder}`,
       borderRadius: UI.radius, boxShadow: UI.panelShadow,
       backdropFilter: UI.glassBlur, WebkitBackdropFilter: UI.glassBlur,
-      fontFamily: UI.font, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+      fontFamily: UI.font, overflow: 'hidden', padding: '10px 12px',
     }}>
-      {/* Header — drag handle */}
-      <div onPointerDown={handleDragStart} style={{ padding: '10px 12px', borderBottom: `1px solid ${UI.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: dragging ? 'grabbing' : 'grab', flexShrink: 0, userSelect: 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 2h12v9H9l-3 3v-3H2V2z" stroke={UI.purple} strokeWidth="1.4" strokeLinejoin="round"/></svg>
-          <span style={{ fontSize: '12px', fontWeight: '600', color: UI.text }}>New comment</span>
-        </div>
-        <button type="button" onClick={onClear} style={{ background: 'none', border: 'none', color: UI.textDim, cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: '4px 6px', borderRadius: '6px' }}
-          onMouseEnter={e => { e.currentTarget.style.color = UI.text; e.currentTarget.style.background = UI.bgRow; }}
-          onMouseLeave={e => { e.currentTarget.style.color = UI.textDim; e.currentTarget.style.background = 'transparent'; }}>✕</button>
-      </div>
-
-      {/* Fields */}
-      <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Add a note…" rows={3}
-          style={{ width: '100%', resize: 'none', border: `1px solid ${UI.border}`, borderRadius: '8px', fontFamily: UI.font, fontSize: '12px', color: UI.text, padding: '8px 10px', background: 'rgba(0,0,0,0.02)', outline: 'none', boxSizing: 'border-box', lineHeight: '1.55' }}
-          onFocus={e => e.target.style.borderColor = UI.purple}
-          onBlur={e => e.target.style.borderColor = UI.border} />
-        <button type="button" onClick={handleAdd} style={{
-          width: '100%', background: UI.purple, border: 'none',
-          color: '#ffffff', fontFamily: UI.font, fontSize: '10px',
-          fontWeight: '700', letterSpacing: '0.18em', textTransform: 'uppercase', padding: '11px 0',
-          cursor: 'pointer', transition: 'background 0.15s', borderRadius: '10px',
-        }}>Add Comment</button>
+      <button type="button" onClick={onClear} title="Cancel"
+        style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', color: UI.textDim, cursor: 'pointer', padding: '3px', borderRadius: '5px', lineHeight: 1, display: 'flex' }}
+        onMouseEnter={e => { e.currentTarget.style.color = UI.text; e.currentTarget.style.background = UI.bgRow; }}
+        onMouseLeave={e => { e.currentTarget.style.color = UI.textDim; e.currentTarget.style.background = 'transparent'; }}
+      ><XIcon size={13} /></button>
+      <textarea
+        ref={taRef}
+        value={description} onChange={e => setDescription(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAdd(); } if (e.key === 'Escape') onClear(); }}
+        placeholder="Add a comment" rows={2}
+        style={{ width: 'calc(100% - 20px)', resize: 'none', border: 'none', fontFamily: UI.font, fontSize: '13px', color: UI.text, padding: 0, background: 'transparent', outline: 'none', boxSizing: 'border-box', lineHeight: '1.5' }}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+        <span style={{ color: UI.textDim, fontSize: '14px', cursor: 'default' }}>@</span>
+        <svg width="15" height="15" viewBox="0 0 20 20" fill="none" style={{ color: UI.textDim }}><rect x="3" y="4" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.4"/><circle cx="7.5" cy="8.5" r="1.2" fill="currentColor"/><path d="M4 14l4-4 3 3 3-3.5 3 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/></svg>
+        <div style={{ flex: 1 }} />
+        <button type="button" onClick={handleAdd} disabled={!description.trim()} title="Add comment"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%',
+            background: description.trim() ? UI.purple : 'rgba(0,0,0,0.06)', border: 'none',
+            color: description.trim() ? '#fff' : UI.textDim, cursor: description.trim() ? 'pointer' : 'default', padding: 0, transition: 'background 0.15s',
+          }}>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M14.5 1.5L1 7l5 2 2 5 6.5-12.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" strokeLinecap="round" fill="none"/></svg>
+        </button>
       </div>
     </div>
   );
@@ -3063,6 +3308,233 @@ const CommentsModeCursor = ({ active }) => {
   return null;
 };
 
+/* Live surface preview shown while the Comment tool is armed, before you've clicked to
+   place a pin — a small colored decal that tracks the cursor across the model with a
+   soft pulsing ring, so hovering reads as "this is where it'll land" rather than the
+   plain pen cursor being the only feedback. Orients to the surface normal like a real
+   projected dot, not a flat camera-facing sprite. */
+const HoverPlacementDot = ({ active, color = UI.purple, suppressed = false }) => {
+  const { camera, gl } = useThree();
+  const groupRef = useRef();
+  const pulseRef = useRef();
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const pointerRef = useRef({ x: 0, y: 0, inside: false });
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const canvas = gl.domElement;
+    const onMove = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const withinRect = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+      // Rect containment alone doesn't account for other UI drawn over the canvas at this
+      // exact point (a pin's badge, its hover-preview card, an expanded panel) — same check
+      // CommentsModeCursor uses for its cursor swap. Without it, hovering another pin's
+      // tooltip still raycasts straight through to the mesh underneath and keeps the ghost
+      // dot/line alive right next to it.
+      pointerRef.current.inside = withinRect && document.elementFromPoint(e.clientX, e.clientY) === canvas;
+      pointerRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointerRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    };
+    const onLeave = () => { pointerRef.current.inside = false; };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    canvas.addEventListener('pointerleave', onLeave);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      canvas.removeEventListener('pointerleave', onLeave);
+    };
+  }, [active, gl]);
+
+  useFrame(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    // `suppressed` covers "a pin is in focus" even when the cursor isn't currently over
+    // it (e.g. it's expanded elsewhere on screen) — the elementFromPoint check above only
+    // catches the cursor-is-directly-over-other-UI case.
+    if (!active || suppressed || !pointerRef.current.inside) { group.visible = false; hoverProjection.current = null; return; }
+    const meshes = shoeModelMeshes.current;
+    if (!meshes.length) { group.visible = false; hoverProjection.current = null; return; }
+    raycaster.setFromCamera(pointerRef.current, camera);
+    const hits = raycaster.intersectObjects(meshes, false);
+    // Prefer a front-facing hit (matches RaycastPlane/CommentsModeCursor) — the nearest
+    // raw hit can be a back-facing triangle on thin/overlapping geometry (e.g. an inner
+    // lining mesh), which would otherwise point the decal away from the camera.
+    const rayDir = raycaster.ray.direction;
+    const hit = hits.find(h => {
+      if (!h.face) return false;
+      const wn = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+      return wn.dot(rayDir) < 0;
+    }) ?? hits.find(h => h.face);
+    if (!hit) { group.visible = false; hoverProjection.current = null; return; }
+    const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+    group.visible = true;
+    group.position.copy(hit.point).addScaledVector(normal, 0.05);
+    group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+    // Geometry is authored in fixed world units, so without this it visually balloons
+    // the closer the camera gets. Scale with distance-to-camera (like a screen-space
+    // reticle) so it reads as roughly the same size on screen at any zoom level — and
+    // dial the base size down a bit further per feedback that it read too big overall.
+    const dist = camera.position.distanceTo(group.position);
+    group.scale.setScalar(THREE.MathUtils.clamp(dist * 0.16, 0.12, 2.5));
+    // Publish the on-screen position of the decal for the DOM-level ghost line (which
+    // lives outside the Canvas and can't raycast itself) to draw up to.
+    const rect = gl.domElement.getBoundingClientRect();
+    const projected = group.position.clone().project(camera);
+    hoverProjection.current = {
+      x: rect.left + (projected.x + 1) / 2 * rect.width,
+      y: rect.top + (1 - projected.y) / 2 * rect.height,
+    };
+    if (pulseRef.current) {
+      const loop = (performance.now() / 900) % 1;
+      pulseRef.current.scale.setScalar(0.6 + loop * 1.4);
+      pulseRef.current.material.opacity = 0.55 * (1 - loop);
+    }
+  });
+
+  return (
+    <group ref={groupRef} visible={false}>
+      <mesh renderOrder={10}>
+        <circleGeometry args={[0.022, 24]} />
+        <meshBasicMaterial color={color} transparent opacity={0.95} depthTest={false} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh renderOrder={10}>
+        <ringGeometry args={[0.025, 0.031, 32]} />
+        <meshBasicMaterial color={color} transparent opacity={0.9} depthTest={false} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh ref={pulseRef} renderOrder={9}>
+        <ringGeometry args={[0.022, 0.031, 32]} />
+        <meshBasicMaterial color={color} transparent opacity={0.5} depthTest={false} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+};
+
+/* Callout placement preview: the number the next callout is about to become, docked
+   directly above the Comment/Callout toolbar button — like a notification badge on an
+   icon — while the Callout tool is armed, with a thin dashed "ghost" leader line running
+   up to wherever HoverPlacementDot currently sits on the model. No permanent label; hover
+   the badge itself to grow it and reveal a tooltip, the same on-hover-only pattern as
+   CalloutBadge's own "Hover label pill" (~line 791) rather than a caption shown at rest.
+   Plain DOM (not drei <Html>) since the badge's anchor is fixed in screen space, not tied
+   to any 3D point — only the far end of the line moves with the cursor. Both the badge's
+   position (tracking the toolbar button, which can itself shift as menus open/close) and
+   the line are driven by one rAF loop instead of React state, so nothing here re-renders
+   60×/sec. */
+const CalloutTopDock = ({ active, number, color, buttonRef }) => {
+  const wrapRef = useRef(null);
+  const dockRef = useRef(null);
+  const lineRef = useRef(null);
+  const [hovered, setHovered] = useState(false);
+
+  useEffect(() => {
+    if (!active) { calloutDockAnchor.current = null; return undefined; }
+    let raf;
+    const tick = () => {
+      const btnEl = buttonRef?.current;
+      const wrapEl = wrapRef.current;
+      if (btnEl && wrapEl) {
+        const br = btnEl.getBoundingClientRect();
+        wrapEl.style.left = `${br.left + br.width / 2}px`;
+        wrapEl.style.top = `${br.top - 14}px`;
+      }
+      const dockEl = dockRef.current;
+      const lineEl = lineRef.current;
+      if (dockEl && lineEl) {
+        const r = dockEl.getBoundingClientRect();
+        const fromX = r.left + r.width / 2;
+        const fromY = r.top + r.height / 2;
+        const proj = hoverProjection.current;
+        if (proj) {
+          lineEl.setAttribute('x1', fromX);
+          lineEl.setAttribute('y1', fromY);
+          lineEl.setAttribute('x2', proj.x);
+          lineEl.setAttribute('y2', proj.y);
+          lineEl.style.opacity = '0.55';
+        } else {
+          lineEl.style.opacity = '0';
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { cancelAnimationFrame(raf); calloutDockAnchor.current = null; };
+  }, [active, buttonRef]);
+
+  if (!active) return null;
+
+  return (
+    <>
+      <svg style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', pointerEvents: 'none', zIndex: 40 }}>
+        <line ref={lineRef} stroke={color} strokeWidth="1.5" strokeDasharray="4 5" opacity="0" style={{ transition: 'opacity 0.18s ease' }} />
+      </svg>
+      <div ref={wrapRef} style={{ position: 'fixed', left: 0, top: 0, transform: 'translate(-50%, -100%)', zIndex: 41 }}>
+        <div
+          ref={(el) => { dockRef.current = el; calloutDockAnchor.current = el; }}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          style={{
+            position: 'relative', width: '28px', height: '28px', borderRadius: '50%', background: color,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto',
+            boxShadow: hovered
+              ? `0 4px 20px rgba(0,0,0,0.4), 0 0 0 2.5px #ffffff, 0 0 0 5px ${color}66`
+              : '0 2px 12px rgba(0,0,0,0.3), 0 0 0 2.5px #ffffff',
+            color: DS.white, fontSize: '13px', fontWeight: 400, fontFamily: 'system-ui, sans-serif',
+            transform: hovered ? 'scale(1.15)' : 'scale(1)',
+            transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+          }}
+        >
+          {number}
+          {/* Same pill CalloutBadge uses for its own hover label (~line 791) — flat
+              surface-token background, fully-rounded ends, border + soft shadow. */}
+          {hovered && (
+            <div style={{
+              position: 'absolute', left: 'calc(100% + 10px)', top: '50%',
+              transform: 'translateY(-50%)', height: '32px',
+              display: 'flex', alignItems: 'center',
+              background: 'var(--color-surface-content-default)', border: '1px solid var(--color-border-default)',
+              color: 'var(--color-text-default)', fontSize: '13px', fontWeight: 400, fontFamily: DS.font,
+              padding: '0 14px', borderRadius: '16px',
+              whiteSpace: 'nowrap', boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+              pointerEvents: 'none', animation: 'calloutFadeIn 0.12s ease',
+            }}>
+              Click on the model to add a new pin
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+};
+
+/* Plays once per callout placement: a clone of the number badge flies from the top
+   dock to the exact screen point that was clicked, landing right as the real 3D-anchored
+   marker appears there. Two-phase mount (render at `from` with no transition, then flip
+   to `to` with one on the next frame) — a plain CSS FLIP, no animation library needed. */
+const DropAnimBadge = ({ from, to, number, color, onDone }) => {
+  const [atEnd, setAtEnd] = useState(false);
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setAtEnd(true));
+    const t = setTimeout(() => onDone?.(), 280);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pos = atEnd ? to : from;
+  return (
+    <div style={{
+      position: 'fixed', left: pos.x, top: pos.y,
+      transform: `translate(-50%, -50%) scale(${atEnd ? 1 : 0.8})`,
+      transition: atEnd ? 'left 0.26s cubic-bezier(0.22,1,0.36,1), top 0.26s cubic-bezier(0.22,1,0.36,1), transform 0.26s cubic-bezier(0.22,1,0.36,1)' : 'none',
+      width: '28px', height: '28px', borderRadius: '50%', background: color,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      boxShadow: '0 2px 12px rgba(0,0,0,0.3), 0 0 0 2.5px #ffffff',
+      color: DS.white, fontSize: '13px', fontWeight: 400, fontFamily: 'system-ui, sans-serif',
+      zIndex: 60, pointerEvents: 'none',
+    }}>
+      {number}
+    </div>
+  );
+};
+
 const SceneBackground = ({ skyColor, bgColor, fogColor, fogNear, fogFar }) => {
   const { scene } = useThree();
   // Background = vertical gradient from Sky (top) → Horizon (bgColor, bottom).
@@ -4204,19 +4676,92 @@ const CL = {
 };
 
 // PIN COLOUR PALETTE — same as pen/pencil tool
+// Values + text pairing match the Figma "Pin badge" component's Colour variants exactly:
+// Blueberry/Strawberry (dark, saturated) get light text; Mango/Mint (light) get dark text.
 const CALLOUT_PALETTE = [
-  { id: 'purple', value: '#8470F0' },
-  { id: 'red',    value: '#EE6B5E' },
-  { id: 'amber',  value: '#F6A831' },
-  { id: 'mint',   value: '#92F5B5' },
-  { id: 'black',  value: '#1C1C1E' },
+  { id: 'purple', value: '#6530F7', text: '#fff' },    // Blueberry — Tokens/Text/Inverse/Light
+  { id: 'red',    value: '#FA5050', text: '#fff' },    // Strawberry (Raspberry) — Tokens/Text/Inverse/Light
+  { id: 'amber',  value: '#FFBC3A', text: '#1A1A1B' }, // Mango — Tokens/Text/Inverse/Dark
+  { id: 'mint',   value: '#92F5B5', text: '#1A1A1B' }, // Mint — Tokens/Text/Inverse/Dark
+  { id: 'black',  value: '#1C1C1E', text: '#fff' },
 ];
 
-const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColorChange, onSelect, onOpen, onHover, selectedId, onReorder, editMode, panelTop = '120px', allHidden = false, onToggleAllHidden, hiddenIds, onToggleHidden }) => {
+// Look up the correct badge text colour for a given pin colour, matching the Figma component's
+// per-variant text assignment. Falls back to white for any colour outside the fixed palette.
+const badgeTextColor = (hex) => CALLOUT_PALETTE.find(c => c.value.toLowerCase() === (hex || '').toLowerCase())?.text || '#fff';
+
+const formatDateGroupLabel = (ts) => {
+  const d = new Date(ts), now = new Date();
+  const startOfDay = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
+const DateGroupHeader = ({ label }) => (
+  <div style={{ padding: '12px 16px 4px' }}>
+    <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-subtle)', fontFamily: "'Inter', sans-serif", lineHeight: '16px', textTransform: 'uppercase' }}>
+      {label}
+    </span>
+  </div>
+);
+
+const CommentRow = ({ t, onOpen, isHidden }) => {
+  const [hovered, setHovered] = useState(false);
+  const pinColor = t.color || UI.purple;
+  const initial = (t.author || '?')[0].toUpperCase();
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={onOpen}
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: '8px',
+        padding: '8px 12px 8px 16px', cursor: 'pointer', boxSizing: 'border-box', width: '100%',
+        background: hovered ? 'var(--color-overlay-subtle)' : 'transparent',
+        opacity: isHidden ? 0.4 : 1,
+        transition: 'background 0.1s, opacity 0.18s ease',
+      }}
+    >
+      <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: pinColor, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: badgeTextColor(pinColor), fontSize: '12px', fontWeight: 500, fontFamily: UI.font, lineHeight: '16px', textTransform: 'uppercase' }}>
+        {initial}
+      </div>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        <span style={{ fontSize: '14px', fontWeight: 400, color: 'var(--color-text-default)', fontFamily: "'Inter', sans-serif", lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {t.author} — {t.label}
+        </span>
+        <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--color-text-subtle)', fontFamily: "'Inter', sans-serif", lineHeight: '16px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {t.description}
+        </span>
+      </div>
+    </div>
+  );
+};
+
+const FeedbackPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColorChange, onSelect, onOpen, onHover, selectedId, onReorder, editMode, panelTop = '120px', activeTab = 'comments', onChangeTab, allHidden = false, onToggleAllHidden, hiddenIds, onToggleHidden, commentsAllHidden = false, onToggleCommentsAllHidden, hiddenCommentIds }) => {
+
   const callouts = useMemo(() => {
     const raw = tooltips.filter(t => t.commentMode !== 'default');
     return [...raw].sort((a, b) => (a.sequenceNumber ?? 999) - (b.sequenceNumber ?? 999));
   }, [tooltips]);
+
+  const comments = useMemo(() => {
+    const raw = tooltips.filter(t => t.commentMode === 'default');
+    return [...raw].sort((a, b) => (b.created ?? 0) - (a.created ?? 0));
+  }, [tooltips]);
+
+  const groupedComments = useMemo(() => {
+    const groups = [];
+    for (const c of comments) {
+      const label = formatDateGroupLabel(c.created ?? Date.now());
+      let g = groups.find(g => g.label === label);
+      if (!g) { g = { label, items: [] }; groups.push(g); }
+      g.items.push(c);
+    }
+    return groups;
+  }, [comments]);
 
   const [pos, setPos] = useState(null);
   const [size, setSize] = useState({ w: 280, h: null });
@@ -4379,63 +4924,138 @@ const CalloutsPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColo
           onMouseDown={onHeaderMouseDown}
           onMouseEnter={() => { setHeaderHovered(true); if (dragPillRef.current) dragPillRef.current.style.opacity = '1'; }}
           onMouseLeave={() => { setHeaderHovered(false); if (dragPillRef.current) dragPillRef.current.style.opacity = '0.5'; }}
-          style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '36px', padding: '0 8px', boxShadow: '0 1px 0 var(--color-overlay-divider)', flexShrink: 0, cursor: 'grab' }}
+          style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '36px', padding: '0 8px', flexShrink: 0, cursor: 'grab' }}
         >
-          <span style={{ fontSize: '14px', fontWeight: 400, color: 'var(--color-text-default)', fontFamily: "'Inter', sans-serif", lineHeight: '20px' }}>Callouts</span>
+          <span style={{ fontSize: '14px', fontWeight: 400, color: 'var(--color-text-default)', fontFamily: "'Inter', sans-serif", lineHeight: '20px' }}>Feedback</span>
           <div ref={dragPillRef} style={{ position: 'absolute', left: '50%', top: '8px', transform: 'translateX(-50%)', width: '64px', height: '2px', borderRadius: '1px', background: 'var(--color-drag-pill)', opacity: 0.5, pointerEvents: 'none', transition: 'background 0.2s, opacity 0.2s' }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <button onMouseDown={e => e.stopPropagation()} onClick={onToggleAllHidden} title={allHidden ? 'Show all' : 'Hide all'}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px', borderRadius: '6px', border: 'none', background: 'transparent', cursor: 'pointer', color: allHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)', padding: 0 }}
-              onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
-              onMouseLeave={e => e.currentTarget.style.color = allHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)'}
-            >
-              {allHidden ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-            <button onMouseDown={e => e.stopPropagation()} onClick={() => onOpenChange(false)} title="Close"
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px', borderRadius: '6px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-icon-subtle)', padding: 0 }}
-              onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
-              onMouseLeave={e => e.currentTarget.style.color = 'var(--color-icon-subtle)'}
-            >
-              <XIcon size={16} />
-            </button>
-          </div>
+          <button onMouseDown={e => e.stopPropagation()} onClick={() => onOpenChange(false)} title="Close"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px', borderRadius: '6px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-icon-subtle)', padding: 0 }}
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--color-icon-subtle)'}
+          >
+            <XIcon size={16} />
+          </button>
         </div>
 
-        {/* Empty state */}
-        {callouts.length === 0 && (
-          <div style={{ padding: '16px', fontSize: '14px', color: 'var(--color-border-default)', textAlign: 'center', fontFamily: "'Inter', sans-serif" }}>
-            {editMode ? 'Click on the model to add a callout' : 'No callouts placed'}
-          </div>
-        )}
-
-        {/* Rows */}
-        <div ref={listRef} style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
-          {callouts.map((t, i) => {
-            const isHidden = allHidden || hiddenIds?.has(t.id);
-            const isSelected = selectedId === t.id;
-            const isDraggingThis = dragRowId === t.id;
-            // Suppress DropGap when drop would leave item in its current position
-            const dragIdx = callouts.findIndex(c => c.id === dragRowId);
-            const prevId = dragIdx > 0 ? callouts[dragIdx - 1].id : null;
-            const isNoOp = dropAfterId === prevId; // would land right back where it started
-            const showDropAbove = !isNoOp && dragRowId && !isDraggingThis && dropAfterId === null && i === 0;
-            const showDropBelow = !isNoOp && dragRowId && !isDraggingThis && dropAfterId === t.id;
+        {/* Segmented control */}
+        <div style={{ display: 'flex', gap: '4px', padding: '4px 8px', flexShrink: 0 }}>
+          {[
+            { id: 'comments', label: `Comments (${comments.length})` },
+            { id: 'callouts', label: `Callouts (${callouts.length})` },
+          ].map(tab => {
+            const isActive = activeTab === tab.id;
             return (
-              <CalloutRow
-                key={t.id} t={t} index={i}
-                isHidden={isHidden} isSelected={isSelected}
-                isDraggingThis={isDraggingThis}
-                showDropAbove={showDropAbove} showDropBelow={showDropBelow}
-                editMode={editMode}
-                onPointerDown={(e) => handleRowPointerDown(e, t)}
-                onRemove={() => onRemove?.(t.id)}
-                onOpen={() => { onFlyTo?.(t); onOpen?.(t.id); }}
-                onHoverIn={() => onHover?.(t.id)}
-                onHoverOut={() => onHover?.(null)}
-              />
+              <button
+                key={tab.id}
+                onMouseDown={e => e.stopPropagation()}
+                onClick={() => onChangeTab?.(tab.id)}
+                style={{
+                  flex: 1, padding: '8px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                  background: isActive ? 'var(--color-background-inverse)' : 'var(--color-background-subtle-default)',
+                  color: isActive ? '#000000' : 'var(--color-text-default)',
+                  fontSize: '12px', fontWeight: 500, fontFamily: "'Inter', sans-serif", lineHeight: '16px',
+                  textTransform: 'uppercase',
+                  transition: 'background 0.12s, color 0.12s',
+                }}
+              >
+                {tab.label}
+              </button>
             );
           })}
         </div>
+
+        {/* Callouts count row — only on the Callouts tab */}
+        {activeTab === 'callouts' && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px 8px', flexShrink: 0 }}>
+            <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--color-text-subtle)', fontFamily: "'Inter', sans-serif", lineHeight: '16px' }}>
+              {allHidden ? `${callouts.length} callouts hidden` : `${callouts.length} callouts`}
+            </span>
+            <button onMouseDown={e => e.stopPropagation()} onClick={onToggleAllHidden} title={allHidden ? 'Show all' : 'Hide all'}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', color: allHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)' }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
+              onMouseLeave={e => e.currentTarget.style.color = allHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)'}
+            >
+              {allHidden ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+        )}
+
+        {/* Comments count row — only on the Comments tab */}
+        {activeTab === 'comments' && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px 8px', flexShrink: 0 }}>
+            <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--color-text-subtle)', fontFamily: "'Inter', sans-serif", lineHeight: '16px' }}>
+              {commentsAllHidden ? `${comments.length} comments hidden` : `${comments.length} comments`}
+            </span>
+            <button onMouseDown={e => e.stopPropagation()} onClick={onToggleCommentsAllHidden} title={commentsAllHidden ? 'Show all' : 'Hide all'}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', color: commentsAllHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)' }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
+              onMouseLeave={e => e.currentTarget.style.color = commentsAllHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)'}
+            >
+              {commentsAllHidden ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+        )}
+
+        {/* Comments tab */}
+        {activeTab === 'comments' && (
+          comments.length === 0 ? (
+            <div style={{ padding: '16px', fontSize: '14px', color: 'var(--color-border-default)', textAlign: 'center', fontFamily: "'Inter', sans-serif" }}>
+              No comments yet
+            </div>
+          ) : (
+            <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              {groupedComments.map(group => (
+                <div key={group.label}>
+                  <DateGroupHeader label={group.label} />
+                  {group.items.map(t => (
+                    <CommentRow
+                      key={t.id} t={t}
+                      isHidden={commentsAllHidden || hiddenCommentIds?.has(t.id)}
+                      onOpen={() => { onFlyTo?.(t); onOpen?.(t.id); }}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {/* Callouts tab */}
+        {activeTab === 'callouts' && (
+          callouts.length === 0 ? (
+            <div style={{ padding: '16px', fontSize: '14px', color: 'var(--color-border-default)', textAlign: 'center', fontFamily: "'Inter', sans-serif" }}>
+              {editMode ? 'Click on the model to add a callout' : 'No callouts placed'}
+            </div>
+          ) : (
+            <div ref={listRef} style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              {callouts.map((t, i) => {
+                const isHidden = allHidden || hiddenIds?.has(t.id);
+                const isSelected = selectedId === t.id;
+                const isDraggingThis = dragRowId === t.id;
+                // Suppress DropGap when drop would leave item in its current position
+                const dragIdx = callouts.findIndex(c => c.id === dragRowId);
+                const prevId = dragIdx > 0 ? callouts[dragIdx - 1].id : null;
+                const isNoOp = dropAfterId === prevId; // would land right back where it started
+                const showDropAbove = !isNoOp && dragRowId && !isDraggingThis && dropAfterId === null && i === 0;
+                const showDropBelow = !isNoOp && dragRowId && !isDraggingThis && dropAfterId === t.id;
+                return (
+                  <CalloutRow
+                    key={t.id} t={t} index={i}
+                    isHidden={isHidden} isSelected={isSelected}
+                    isDraggingThis={isDraggingThis}
+                    showDropAbove={showDropAbove} showDropBelow={showDropBelow}
+                    editMode={editMode}
+                    onPointerDown={(e) => handleRowPointerDown(e, t)}
+                    onRemove={() => onRemove?.(t.id)}
+                    onOpen={() => { onFlyTo?.(t); onOpen?.(t.id); }}
+                    onHoverIn={() => onHover?.(t.id)}
+                    onHoverOut={() => onHover?.(null)}
+                  />
+                );
+              })}
+            </div>
+          )
+        )}
 
         {/* Resize handles */}
         <div onMouseDown={makeResizeHandler(['w'])} style={{ position: 'absolute', top: 0, left: 0, width: '5px', height: '100%', cursor: 'ew-resize' }} />
@@ -4507,7 +5127,7 @@ const CalloutRow = ({ t, index, isHidden, isSelected, isDraggingThis, showDropAb
         }}
       >
         {/* Coloured badge circle — display only, no colour picker here */}
-        <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: pinColor, border: '2px solid rgba(255,255,255,0.25)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '11px', fontWeight: 400, fontFamily: 'system-ui, sans-serif', boxShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>
+        <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: pinColor, border: '2px solid rgba(255,255,255,0.25)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: badgeTextColor(pinColor), fontSize: '12px', fontWeight: 500, fontFamily: UI.font, lineHeight: '16px', textTransform: 'uppercase' }}>
           {t.sequenceNumber ?? index + 1}
         </div>
         {/* Label — clickable to open in scene */}
@@ -6132,7 +6752,7 @@ const ShowcaseUI = (props) => {
     selectedId, onSelect, onMove, onRename, onSetCamera, onClearCamera, onUpdateTooltip,
     onResetCamera, onToggleAutoRotate, autoRotate, panelOpen, setPanelOpen,
     tooltipsHidden, onToggleTooltips, scene, onUpdateScene, settingsOpen,
-    setSettingsOpen, onFlyTo, currentUser, setCurrentUser, isPinSeen,
+    setSettingsOpen, onFlyTo, currentUser, setCurrentUser, isPinSeen, onPinUnviewed,
     threeStateRef, orbitRef, logoMenuOpen, setLogoMenuOpen,
     onNewFile, onImportFile, onNavCubeClick, fbxFileName,
     annotationMode, onToggleAnnotation,
@@ -6220,8 +6840,9 @@ const ShowcaseUI = (props) => {
 
 
 
-      {/* Comment floating panel — only active when comment tool is selected */}
-      {editMode && (
+      {/* Comment floating panel — only for plain comments; callouts get a lightweight
+          inline label pill instead (rendered beside the pin itself, see ClickMarker). */}
+      {editMode && commentMode === 'default' && (
         <CommentFloatingPanel
           point={clickPoint}
           onAdd={onAddTooltip}
@@ -6243,19 +6864,7 @@ const ShowcaseUI = (props) => {
         );
       })()}
 
-      {/* Comment detail popup — only for default comment pins; callouts expand inline */}
-      {expandedCommentId && (() => {
-        const t = tooltips.find(x => x.id === expandedCommentId);
-        if (!t || t.commentMode !== 'default') return null;
-        return (
-          <CommentDetailPopup
-            tooltip={t}
-            onClose={() => setExpandedCommentId(null)}
-            onUpdate={onUpdateTooltip}
-            currentUser={currentUser}
-          />
-        );
-      })()}
+      {/* Comment thread panel now renders inline, docked beside its pin — see PinLeader. */}
 
       {/* Old in-annotation toolbar removed — replaced by the always-open
           BottomToolbar + contextual popover (rendered at App level). */}
@@ -6583,10 +7192,16 @@ export default function App() {
   const [modelLoaded, setModelLoaded] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [clickPoint, setClickPoint] = useState(null);
+  const [dropAnim, setDropAnim] = useState(null); // { number, from:{x,y}, to:{x,y}, color } — callout "flies into place" on click
+  const commentToolBtnRef = useRef(null); // BottomToolbar's Comment/Callout button — CalloutTopDock docks its badge directly above it
   const [tooltips, setTooltips] = useState([
     { id: 2, label: "Toe Box", surfaceX: 0.8, surfaceY: 0.85, surfaceZ: 0.85, x: 0.8, y: 0.85 + LEADER_LIFT, z: 0.85, hasCamera: true, author: 'S. Patel', sequenceNumber: 1, description: "Widen toe splay zone by 4mm at forefoot. Perforations approved — move to laser-cut pattern per v3 spec.", details: [{ key: "Status", value: "Approved w/ Changes" }, { key: "Priority", value: "Medium" }, { key: "Owner", value: "S. Patel" }], annotations: [] },
     { id: 3, label: "Medial Arch", surfaceX: 0.1, surfaceY: 0.60, surfaceZ: -0.7, x: 0.1, y: 0.60 + LEADER_LIFT, z: -0.7, hasCamera: true, author: 'J. Kim', sequenceNumber: 2, description: "Arch bridge too rigid — switch from nylon shank to TPU torsion plate.", details: [{ key: "Status", value: "Under Review" }, { key: "Priority", value: "High" }, { key: "Owner", value: "M. Chen" }], annotations: [] },
     { id: 4, label: "Lateral Panel", surfaceX: 0.2, surfaceY: 1.15, surfaceZ: 0.9, x: 0.2, y: 1.15 + LEADER_LIFT, z: 0.9, hasCamera: true, author: 'R. Tanaka', sequenceNumber: 3, description: "Hot-melt overlay placement shifted 2mm forward from proto. Align with eyelet row B.", details: [{ key: "Status", value: "Tooling Ready" }, { key: "Priority", value: "Low" }, { key: "Owner", value: "R. Tanaka" }], annotations: [] },
+    // Comments (bubble mode) — separate from the callouts above, shown in the Feedback panel's Comments tab
+    { id: 5, commentMode: 'default', label: "Toe Box", surfaceX: 0.75, surfaceY: 0.9, surfaceZ: 0.75, x: 0.75, y: 0.9, z: 0.75, author: 'S. Patel', color: '#6530F7', created: Date.now(), description: "Great progress on the toe box redesign!" },
+    { id: 6, commentMode: 'default', label: "Medial Arch", surfaceX: 0.15, surfaceY: 0.55, surfaceZ: -0.65, x: 0.15, y: 0.55, z: -0.65, author: 'J. Kim', color: '#FA5050', created: Date.now() - 86400000, description: "Can we get a material swatch for the arch bridge?" },
+    { id: 7, commentMode: 'default', label: "Lateral Panel", surfaceX: 0.25, surfaceY: 1.1, surfaceZ: 0.85, x: 0.25, y: 1.1, z: 0.85, author: 'R. Tanaka', color: '#FFBC3A', created: Date.now() - 86400000, description: "Approved — ready for tooling." },
   ]);
   const [draggingId, setDraggingId] = useState(null);
   const [autoRotate, setAutoRotate] = useState(false);
@@ -6677,6 +7292,9 @@ export default function App() {
   const [calloutsOpen, setCalloutsOpen] = useState(false);
   const [calloutsAllHidden, setCalloutsAllHidden] = useState(false);
   const [hiddenCalloutIds, setHiddenCalloutIds] = useState(() => new Set());
+  const [commentsAllHidden, setCommentsAllHidden] = useState(false);
+  const [hiddenCommentIds, setHiddenCommentIds] = useState(() => new Set());
+  const [feedbackTab, setFeedbackTab] = useState('comments'); // 'comments' | 'callouts' — also filters which type shows in the 3D scene
   const [hoveredCalloutId, setHoveredCalloutId] = useState(null);
   const [scene, setScene] = useState(DEFAULT_SCENE);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -6825,7 +7443,11 @@ export default function App() {
   const selectDrawing = useCallback(() => enterDrawing(lastDrawToolRef.current || 'pencil'), [enterDrawing]);
   const selectComment = useCallback((mode) => {
     setCameraTool(false);
-    if (mode) setCommentMode(mode);
+    if (mode) {
+      setCommentMode(mode);
+      // Keep the Feedback panel's tab in lockstep with the toolbar's comment/callout variant.
+      setFeedbackTab(mode === 'callout' ? 'callouts' : 'comments');
+    }
     setActiveMode('comments');
     setAnnotationMode(true);
     setActiveTool('comment');
@@ -6833,7 +7455,7 @@ export default function App() {
     setActiveFlyId(null);
     setExpandedPinId(null);
     setPanelOpen(true);
-    if (mode === 'callout') setCalloutsOpen(true);
+    setCalloutsOpen(true); // Feedback panel opens for either comment sub-mode now
   }, []);
   const selectCamera = useCallback(() => {
     setCameraVariant('camera');
@@ -6880,6 +7502,11 @@ export default function App() {
     if (id == null) return;
     const key = String(id);
     setSeenPinIds((prev) => (prev.includes(key) ? prev : [...prev, key]));
+  }, []);
+  const markPinUnseen = useCallback((id) => {
+    if (id == null) return;
+    const key = String(id);
+    setSeenPinIds((prev) => prev.filter(x => x !== key));
   }, []);
   const isPinSeenFn = useCallback((id) => seenPinIds.includes(String(id)), [seenPinIds]);
 
@@ -7339,11 +7966,18 @@ export default function App() {
     const enriched = {
       ...t,
       author: currentUser,
-      sequenceNumber: tooltips.length + 1,
+      // Callouts are numbered within their own sequence (matches the Callouts panel and
+      // the re-sequencing-on-delete logic below) — counting all tooltips here would drift
+      // as soon as a plain comment and a callout are interleaved.
+      sequenceNumber: commentMode === 'callout'
+        ? tooltips.filter(x => x.commentMode !== 'default').length + 1
+        : tooltips.length + 1,
       cameraView,
       hasCamera: !!(cameraView || t.hasCamera),
       commentMode,           // 'default' (bubble) | 'callout' (leader) — stamped at placement
       color: redlineColor,   // selected swatch color applies to bubble / line / dot
+      resolved: false,
+      replies: [],
     };
     setTooltips((prev) => [...prev, enriched]);
     setClickPoint(null);
@@ -7712,6 +8346,10 @@ export default function App() {
     setPings(p => [...p, { id, x: e.clientX, y: e.clientY }]);
   }, [activeMode]);
 
+  // Callouts have their own number sequence, independent of plain comments — matches
+  // the Callouts panel (which sorts/displays by sequenceNumber within this same subset).
+  const nextCalloutNumber = tooltips.filter(t => t.commentMode !== 'default').length + 1;
+
   return (
     <div
       style={{ width: '100vw', height: '100vh', background: UI.bg, cursor: 'default' }}
@@ -7753,7 +8391,7 @@ export default function App() {
         scene={scene} onUpdateScene={setScene} settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen}
         onFlyTo={handleFlyTo}
         currentUser={currentUser} setCurrentUser={setCurrentUser}
-        isPinSeen={isPinSeenFn} onPinViewed={markPinSeen}
+        isPinSeen={isPinSeenFn} onPinViewed={markPinSeen} onPinUnviewed={markPinUnseen}
         annotationMode={annotationMode}
         onToggleAnnotation={() => {
           setAnnotationMode(v => {
@@ -7908,6 +8546,7 @@ export default function App() {
           cropOn={cameraSquare} onToggleCrop={() => setCameraSquare(v => !v)}
           onUndo={handleUndoRedline} onRedo={handleRedoRedline}
           canUndo={actionHistory.length > 0} canRedo={undoStack.length > 0}
+          commentButtonRef={commentToolBtnRef}
         />
       )}
 
@@ -8083,9 +8722,9 @@ export default function App() {
         onCancelEdit={handleCancelPenEdit}
       />
 
-      <CalloutsPanel
+      <FeedbackPanel
         tooltips={tooltips}
-        open={calloutsOpen && annotationMode && activeTool === 'comment' && commentMode === 'callout'}
+        open={calloutsOpen && annotationMode && activeTool === 'comment'}
         onOpenChange={setCalloutsOpen}
         onFlyTo={handleFlyTo}
         onRemove={(id) => setTooltips(prev => {
@@ -8111,6 +8750,14 @@ export default function App() {
           return updated;
         })}
         editMode={editMode}
+        activeTab={feedbackTab}
+        onChangeTab={(tab) => {
+          setFeedbackTab(tab);
+          // Keep the toolbar's comment/callout variant in lockstep with the panel's tab.
+          // The panel only shows while the comment tool is already active, so this never
+          // needs to force-switch tools — just the sub-variant.
+          setCommentMode(tab === 'callouts' ? 'callout' : 'default');
+        }}
         allHidden={calloutsAllHidden}
         onToggleAllHidden={() => setCalloutsAllHidden(v => !v)}
         hiddenIds={hiddenCalloutIds}
@@ -8119,6 +8766,9 @@ export default function App() {
           if (next.has(id)) next.delete(id); else next.add(id);
           return next;
         })}
+        commentsAllHidden={commentsAllHidden}
+        onToggleCommentsAllHidden={() => setCommentsAllHidden(v => !v)}
+        hiddenCommentIds={hiddenCommentIds}
       />
 
       {penMode && penDirectSelect && penAnchors.length > 0 && (
@@ -8181,6 +8831,7 @@ export default function App() {
         <ThreeStateCapture stateRef={threeStateRef} />
         <ViewModeCursor active={!annotationMode} />
         <CommentsModeCursor active={editMode && commentMode !== 'callout'} />
+        <HoverPlacementDot active={editMode && !clickPoint && !presentationMode} color={redlineColor} suppressed={!!expandedCommentId} />
         {/* Model mesh selection disabled — re-enable by restoring BoxSelect/SelectionHighlight/SelectionOutlines/SelectionGizmo */}
         <PenModeCursor active={penMode} />
         {/* FIX: reactively update tone mapping exposure when scene changes */}
@@ -8216,7 +8867,21 @@ export default function App() {
 
         {!redlineMode && !penMode && (
           <RaycastPlane
-            onPick={editMode ? (raw) => setClickPoint({ ...raw, surfaceX: raw.x, surfaceY: raw.y, surfaceZ: raw.z, y: commentMode === 'callout' ? raw.y + LEADER_LIFT : raw.y }) : () => {}}
+            onPick={editMode ? (raw) => setClickPoint(prev => {
+              // A second click while the composer is already open just closes it — it
+              // shouldn't jump to the new spot and look like a second composer appeared.
+              if (prev) return null;
+              if (commentMode === 'callout' && calloutDockAnchor.current) {
+                const r = calloutDockAnchor.current.getBoundingClientRect();
+                setDropAnim({
+                  number: nextCalloutNumber,
+                  from: { x: r.left + r.width / 2, y: r.top + r.height / 2 },
+                  to: { x: raw.screenX, y: raw.screenY },
+                  color: redlineColor,
+                });
+              }
+              return { ...raw, surfaceX: raw.x, surfaceY: raw.y, surfaceZ: raw.z, y: commentMode === 'callout' ? raw.y + LEADER_LIFT : raw.y };
+            }) : () => {}}
             draggingId={draggingId}
             onModelClick={() => {}}
             onContextMenu={handleContextMenuOpen}
@@ -8224,7 +8889,24 @@ export default function App() {
           />
         )}
 
-        {clickPoint && !redlineMode && !presentationMode && <ClickMarker point={clickPoint} nextNumber={tooltips.length + 1} commentMode={commentMode} color={redlineColor} />}
+        {clickPoint && !redlineMode && !presentationMode && (
+          <ClickMarker
+            point={clickPoint}
+            nextNumber={nextCalloutNumber}
+            commentMode={commentMode}
+            color={redlineColor}
+            authorLetter={(currentUser || '?')[0].toUpperCase()}
+            onCommitLabel={(label) => {
+              handleAddTooltip({
+                ...clickPoint,
+                label: label || `Callout ${nextCalloutNumber}`,
+                description: '', details: [], id: Date.now(), created: Date.now(),
+                author: currentUser || 'You',
+              });
+            }}
+            onCancel={() => setClickPoint(null)}
+          />
+        )}
         <RedlineStrokes3D redlines={redlines} modelPosition={modelPosition} hidden={tooltipsHidden || presentationMode} renderAbove={renderAbove} />
         <LiveRedlineStroke points={livePoints} color={pencilColor} width={redlineWidth} modelPosition={modelPosition} hidden={tooltipsHidden || presentationMode} renderAbove={renderAbove} />
         <EmojiAnnotations3D annotations={emojiAnnotations} hidden={tooltipsHidden || presentationMode} />
@@ -8247,7 +8929,14 @@ export default function App() {
         {!tooltipsHidden && !redlineMode && !penMode && !presentationMode && (
           <TooltipPins
             tooltips={tooltips.filter(t => {
-              if (t.commentMode !== 'default') {
+              const isComment = t.commentMode === 'default';
+              // Feedback panel tab scopes the scene to the type currently being reviewed
+              if (feedbackTab === 'comments' && !isComment) return false;
+              if (feedbackTab === 'callouts' && isComment) return false;
+              if (isComment) {
+                if (commentsAllHidden) return false;
+                if (hiddenCommentIds.has(t.id)) return false;
+              } else {
                 if (calloutsAllHidden) return false;
                 if (hiddenCalloutIds.has(t.id)) return false;
               }
@@ -8256,9 +8945,10 @@ export default function App() {
             selectedId={draggingId} onSelect={handleSelectTooltip}
             editMode={editMode} onFlyTo={handleFlyTo}
             expandedId={expandedCommentId} onSetExpanded={(id) => setExpandedCommentId(prev => prev === id ? null : id)}
-            onPinViewed={markPinSeen}
+            onPinViewed={markPinSeen} onPinUnviewed={markPinUnseen}
             renderAbove={renderAbove}
             onUpdatePin={handleUpdateTooltip}
+            currentUser={currentUser}
             isPinSeen={isPinSeenFn}
             highlightedId={hoveredCalloutId}
           />
@@ -8288,11 +8978,31 @@ export default function App() {
           // Web-standard nav: left drag = rotate, right drag = pan, scroll = zoom.
           // In annotation/pen/comment modes left drag is consumed by those tools, so
           // we null LEFT for OrbitControls there to avoid conflict.
-          mouseButtons={{ LEFT: annotationMode ? null : THREE.MOUSE.ROTATE, MIDDLE: null, RIGHT: THREE.MOUSE.PAN }}
+          // Comment tool (both Comment and Callout sub-modes) keeps left-drag orbit enabled —
+          // placing a pin is a plain click (RaycastPlane's guardedClick ignores drags over 5px),
+          // so a left-drag is unambiguously "move the scene" there. Pen/pencil/text still claim
+          // left-drag for drawing.
+          mouseButtons={{ LEFT: (annotationMode && activeTool !== 'comment') ? null : THREE.MOUSE.ROTATE, MIDDLE: null, RIGHT: THREE.MOUSE.PAN }}
           onChange={() => { if (!viewpointFlyRef.current) setAtViewpoint(false); }}
         />
 
       </Canvas>
+
+      <CalloutTopDock
+        active={editMode && commentMode === 'callout' && !clickPoint && !presentationMode}
+        number={nextCalloutNumber}
+        color={redlineColor}
+        buttonRef={commentToolBtnRef}
+      />
+      {dropAnim && (
+        <DropAnimBadge
+          number={dropAnim.number}
+          from={dropAnim.from}
+          to={dropAnim.to}
+          color={dropAnim.color}
+          onDone={() => setDropAnim(null)}
+        />
+      )}
 
       {/* Box-select marquee rectangle (View mode left-drag) */}
       {marquee && (

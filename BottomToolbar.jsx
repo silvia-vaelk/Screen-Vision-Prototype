@@ -143,6 +143,7 @@ export default function BottomToolbar({
   penHasActivePath = false,
   onCapture, cropOn, onToggleCrop,
   onUndo, onRedo, canUndo, canRedo,
+  commentButtonRef,
 }) {
   const [openMenu, setOpenMenu] = useState(null); // 'select' | 'pen' | 'comment' | 'camera' | null
   const [camGrid, setCamGrid] = useState(false);
@@ -327,9 +328,10 @@ export default function BottomToolbar({
     </>
   );
 
-  const commentPopover = commentActive && commentVariant !== 'callout' && !openMenu && popoverShell(
-    <SwatchRow value={commentColor} onChange={setCommentColor} />
-  );
+  // No colour swatch for the Comment tool in either sub-mode — Comments use the current
+  // user's own colour and Callouts get theirs from the pin's own colour dot / detail panel,
+  // matching the Figma-style commenting UX rather than a toolbar-level picker.
+  const commentPopover = null;
 
   const cameraPopover = cameraActive && cameraVariant !== 'section' && !openMenu && popoverShell(
     <>
@@ -399,7 +401,7 @@ export default function BottomToolbar({
             )}
           </div>
 
-          <div style={{ position: 'relative' }}>
+          <div ref={commentButtonRef} style={{ position: 'relative' }}>
             <ToolGroup id="comment" active={commentActive}
               icon={commentVariant === 'callout' ? <CalloutGlyph size={ICON} /> : <MessageSquare size={ICON} />}
               onMain={() => onSelectComment?.(commentVariant)} />
