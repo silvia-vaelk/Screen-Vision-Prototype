@@ -90,15 +90,6 @@ const SEEN_PINS_STORAGE_KEY = '3d-viewer-seen-pin-ids';
 const svgDataCursor = (body, hotX, hotY) =>
   `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">${body}</svg>`)}") ${hotX} ${hotY}, crosshair`;
 
-/* Pin hover cursor = same disc + flat + as in-canvas previews; soft shadow like UI chip. */
-const CURSOR_COMMENT_ON_MODEL = svgDataCursor(
-  '<defs><filter id="cmPinShadow" x="-45%" y="-45%" width="190%" height="190%"><feDropShadow dx="0" dy="1.5" stdDeviation="1.6" flood-color="#000000" flood-opacity="0.26"/></filter></defs><g filter="url(#cmPinShadow)"><circle cx="16" cy="16" r="11" fill="#6c5ce7"/><rect x="15" y="12" width="2" height="8" fill="#ffffff"/><rect x="12" y="15" width="8" height="2" fill="#ffffff"/></g>',
-  16, 16,
-);
-const CURSOR_COMMENT_IDLE = svgDataCursor(
-  '<circle cx="16" cy="16" r="11" fill="none" stroke="#6c5ce7" stroke-width="1.5"/><rect x="15" y="12" width="2" height="8" fill="#6c5ce7"/><rect x="12" y="15" width="8" height="2" fill="#6c5ce7"/>',
-  16, 16,
-);
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 const CURSOR_ORBIT_ROTATE = `url("${BASE}/cursors/cursor-rotate.svg") 7 6, default`;
 const CURSOR_ORBIT_PAN    = `url("${BASE}/cursors/cursor-grab.svg") 12 12, grab`;
@@ -137,7 +128,8 @@ const CURSOR_PEN_DRAW      = CURSOR_PEN;
 const CURSOR_PENCIL_HOVER  = fileCursor('Pencil-unfilled.svg', 3, 21);
 const CURSOR_PENCIL_DRAW   = fileCursor('Pencil-filled.svg', 3, 21);
 const CURSOR_COMMENT_HOVER = fileCursor('comment_unfilled.svg', 5, 21);
-const CURSOR_COMMENT_PLACE = fileCursor('comment_filled.svg', 5, 21);
+/* Comment-mode pin cursor — from Figma design spec (node 87:7564 "Cursor-comment"). */
+const CURSOR_COMMENT_PLACE = `url("${BASE}/cursors/cursor-comment.svg") 2 15, crosshair`;
 const CURSOR_TEXT = `url("${BASE}/icons/text_cursor.svg") 12 4, text`;
 
 const makeEmojiCursor = (emoji) => {
@@ -170,6 +162,18 @@ const hoverProjection = { current: null };
 // DOM node of the top-dock callout number badge, so a click handler outside that
 // component can read its on-screen position as the drop animation's start point.
 const calloutDockAnchor = { current: null };
+// Screen-space projection of the leader line for the callout currently being placed
+// (written every frame by ClickMarker), read by the DOM-level newPinLineOverlay so that
+// line can render above other UI — plain WebGL content can't, no matter its z-index.
+const newPinLineProjection = { current: null };
+// Screen-space projection of every *placed* callout's leader line (written every frame
+// by PinLeader, keyed by tooltip id), read by allPinLinesOverlay. The line used to be a
+// WebGL Three.js Line — after three separate rounds of fighting that material's
+// fog/toneMapped/color behavior (grey, then white, on different fixes), we stopped
+// trying to make WebGL render a flat UI-marker color correctly and moved it to plain
+// SVG, same as the ghost/new-pin line above, where color is just a CSS string with no
+// scene-lighting pipeline in the way.
+const pinLineOverlayData = { current: new Map() };
 
 /* ═══════════════════════════════════════════════════════════════════════════════
    FBX DROP ZONE — shown when no model is loaded yet
@@ -483,38 +487,33 @@ const PinSnapper = ({ tooltips, onSnapped }) => {
 // World-space lift for the leader line (in scene units)
 const LEADER_LIFT = 0.32;
 
-/* Leader line + surface dot for a single pin. Isolated into its own component so
-   we can use refs + useEffect to imperatively update material.depthTest — drei's
-   <Line> spreads extra props onto the Line2 Object3D (not its material), so
-   depthTest={prop} never reaches the LineMaterial without this pattern. */
+/* Leader line + surface dot for a single pin.
+   Previously built on drei's <Line> (three-stdlib's "fat lines" LineMaterial, a hand-
+   ported custom shader) so lineWidth could exceed the 1px most browsers otherwise clamp
+   WebGL lines to. That material's fog/toneMapped handling turned out unreliable here —
+   disabling fog alone still read grey, and forcing toneMapped off on top of that made it
+   render solid white instead of the intended color, on top of depthTest already needing
+   a ref-based workaround because props landed on the wrong object (see prior revisions).
+   Three separate misbehaviors on one exotic material is a sign to stop fighting it: this
+   now uses a plain <line>/<lineBasicMaterial> — Three.js's own standard, extensively-
+   tested material — where fog/toneMapped/depthTest all just work as ordinary reactive
+   props, no imperative overrides needed. Trade-off: linewidth is a known no-op on most
+   platforms for standard WebGL lines, so this renders as a ~1px hairline instead of the
+   previous 1.5px fat line — a minor, acceptable loss next to a color bug. */
 const LeaderLine = ({ surface, elevated, renderAbove, color = UI.purple }) => {
-  const lineRef = useRef();
-  const dotRef = useRef();
-
-  useEffect(() => {
-    if (lineRef.current?.material) {
-      lineRef.current.material.depthTest = !renderAbove;
-      lineRef.current.material.needsUpdate = true;
-    }
-    if (dotRef.current?.material) {
-      dotRef.current.material.depthTest = !renderAbove;
-      dotRef.current.material.needsUpdate = true;
-    }
-  }, [renderAbove]);
+  const positions = useMemo(() => new Float32Array([...surface, ...elevated]), [surface, elevated]);
 
   return (
     <>
-      <Line
-        ref={lineRef}
-        points={[surface, elevated]}
-        color={color}
-        lineWidth={1.5}
-        opacity={0.8}
-        transparent
-      />
-      <mesh ref={dotRef} position={surface} userData={{ isPinDot: true }}>
-        <sphereGeometry args={[0.010, 10, 10]} />
-        <meshBasicMaterial color={color} transparent opacity={0.9} />
+      <line>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" count={2} array={positions} itemSize={3} />
+        </bufferGeometry>
+        <lineBasicMaterial color={color} transparent opacity={1} fog={false} toneMapped={false} depthTest={!renderAbove} />
+      </line>
+      <mesh position={surface} userData={{ isPinDot: true }}>
+        <sphereGeometry args={[0.005, 10, 10]} />
+        <meshBasicMaterial color={color} transparent opacity={1} fog={false} toneMapped={false} depthTest={!renderAbove} />
       </mesh>
     </>
   );
@@ -552,6 +551,30 @@ const ClickMarker = ({ point, nextNumber, commentMode = 'callout', color = UI.pu
   const [quickLabel, setQuickLabel] = useState('');
   const quickInputRef = useRef(null);
   useEffect(() => { setTimeout(() => quickInputRef.current?.focus(), 50); }, []);
+  // The per-frame projection loop below only clears newPinLineProjection on frames where
+  // it keeps running — once clickPoint goes null this whole component unmounts and that
+  // loop simply stops, leaving the last-drawn line stuck on screen forever. Clear it
+  // explicitly on unmount instead of relying on one more frame that never comes.
+  useEffect(() => () => { newPinLineProjection.current = null; }, []);
+  const { camera, gl } = useThree();
+
+  // The leader line itself is plain WebGL content painted onto the 3D canvas, which sits
+  // at a low CSS z-index (well under the Feedback panel) — no z-index on the Line object
+  // can lift it above other DOM UI the way the Html-rendered badge above is lifted. Project
+  // both endpoints to screen space every frame and hand them to newPinLineOverlay, a plain
+  // SVG overlay outside the canvas that CAN sit above everything.
+  useFrame(() => {
+    if (commentMode !== 'callout' || !point) { newPinLineProjection.current = null; return; }
+    const rect = gl.domElement.getBoundingClientRect();
+    const toScreen = (world) => {
+      const p = new THREE.Vector3(...world).project(camera);
+      return { x: rect.left + (p.x + 1) / 2 * rect.width, y: rect.top + (1 - p.y) / 2 * rect.height };
+    };
+    const surfacePt = [point.surfaceX ?? point.x, point.surfaceY ?? point.y, point.surfaceZ ?? point.z];
+    const from = toScreen(surfacePt);
+    const to = toScreen([point.x, point.y, point.z]);
+    newPinLineProjection.current = { x1: from.x, y1: from.y, x2: to.x, y2: to.y, color };
+  });
 
   if (!point) return null;
   // surface = immutable raycast hit; elevated = badge position (may have been moved by user)
@@ -561,7 +584,10 @@ const ClickMarker = ({ point, nextNumber, commentMode = 'callout', color = UI.pu
   // MODE A (default) — speech bubble pinned at the click point, no line/dot
   if (commentMode === 'default') {
     return (
-      <Html position={surface} zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+      // While actively placing, this must win over every other pin and the Feedback side
+      // panel (a fixed-position DOM element around z-index 150) — a plain pin-range z-index
+      // (max ~38) would otherwise get buried under either.
+      <Html position={surface} zIndexRange={[1000, 999]} style={{ pointerEvents: 'none' }}>
         <CommentBubble letter={authorLetter} color={color} />
       </Html>
     );
@@ -569,11 +595,12 @@ const ClickMarker = ({ point, nextNumber, commentMode = 'callout', color = UI.pu
 
   const commit = () => onCommitLabel?.(quickLabel.trim());
 
-  // MODE B (callout) — leader line + dot + elevated badge + quick-add label pill
+  // MODE B (callout) — leader line + dot + elevated badge + quick-add label pill.
+  // Leader line is drawn by newPinLineOverlay (plain SVG, outside the Canvas) — see its
+  // comment for why this isn't a WebGL Three.js Line.
   return (
     <>
-      <LeaderLine surface={surface} elevated={elevated} renderAbove={false} color={color} />
-      <Html position={elevated} zIndexRange={[20, 0]} style={{ overflow: 'visible' }}>
+      <Html position={elevated} zIndexRange={[1000, 999]} style={{ overflow: 'visible' }}>
         <div style={{ position: 'relative', width: '28px', height: '28px', pointerEvents: 'none' }}>
           <div style={{
             width: '28px', height: '28px', borderRadius: '50%', background: color,
@@ -584,29 +611,33 @@ const ClickMarker = ({ point, nextNumber, commentMode = 'callout', color = UI.pu
           }}>
             {nextNumber ?? '?'}
           </div>
+          {/* Top-aligned with the badge (not vertically centered) so the pill only grows
+              downward as its content wraps, instead of drifting upward off the anchor. */}
           <div
             onPointerDown={e => e.stopPropagation()}
             style={{
-              position: 'absolute', left: 'calc(50% + 8px)', top: 0, transform: 'translateY(-50%)', height: '28px',
+              position: 'absolute', left: 'calc(50% + 8px)', top: '-14px', minHeight: '28px',
               display: 'flex', alignItems: 'center',
               background: 'var(--color-surface-content-default)', border: '1px solid var(--color-border-default)',
-              borderRadius: '14px', padding: '0 12px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+              borderRadius: '14px', padding: '6px 12px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
               pointerEvents: 'auto', animation: 'calloutFadeIn 0.12s ease',
             }}
           >
-            <input
+            <textarea
               ref={quickInputRef}
               value={quickLabel}
               onChange={e => setQuickLabel(e.target.value)}
               onKeyDown={e => {
-                if (e.key === 'Enter') { e.preventDefault(); commit(); }
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit(); }
                 if (e.key === 'Escape') onCancel?.();
               }}
               placeholder="Add a pin"
+              rows={1}
               style={{
-                border: 'none', outline: 'none', background: 'transparent',
+                border: 'none', outline: 'none', background: 'transparent', resize: 'none',
                 color: 'var(--color-text-default)', fontSize: '12px', fontFamily: DS.font,
-                width: '130px', padding: 0,
+                lineHeight: '16px', padding: 0, margin: 0,
+                minWidth: '60px', maxWidth: '160px', fieldSizing: 'content', overflow: 'hidden',
               }}
             />
           </div>
@@ -655,11 +686,18 @@ function projectToSurface(clientX, clientY, camera, gl) {
    Both the badge and the surface anchor dot are grab-able:
      • Badge drag  → moves the label freely in 3D (camera-facing plane)
      • Surface drag → slides the surface anchor along the shoe mesh              */
-const CalloutBadge = ({ t, badgeDivRef, onPointerDown, isSelected, pinIconOpen, pinColor, seen, hasCam, editMode, isExpanded, highlighted, onUpdate, onCollapse }) => {
+const CalloutBadge = ({ t, badgeDivRef, onPointerDown, isSelected, pinIconOpen, pinColor, seen, hasCam, editMode, isExpanded, highlighted, onUpdate, onCollapse, onHoverChange }) => {
   const [hovered, setHovered] = useState(false);
+  const [labelHovered, setLabelHovered] = useState(false);
+  const [descHovered, setDescHovered] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [editingLabel, setEditingLabel] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
+  // Local drafts while editing — committing on every keystroke (the old behavior) called
+  // onUpdate -> setTooltips on each character, re-rendering the whole App tree (Canvas,
+  // every other pin, both panels) per key and making typing feel laggy / drop characters.
+  const [labelDraft, setLabelDraft] = useState(t.label || '');
+  const [descDraft, setDescDraft] = useState(t.description || '');
   const paletteRef = useRef(null);
   const panelRef = useRef(null);
   const showLabel = (hovered || highlighted) && !!(t.label);
@@ -703,8 +741,8 @@ const CalloutBadge = ({ t, badgeDivRef, onPointerDown, isSelected, pinIconOpen, 
   return (
     <div
       ref={badgeDivRef}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={() => { setHovered(true); onHoverChange?.(true); }}
+      onMouseLeave={() => { setHovered(false); onHoverChange?.(false); }}
       style={{ position: 'relative', pointerEvents: 'auto', width: '28px', height: '28px' }}
     >
       {/* Badge circle — always draggable */}
@@ -757,17 +795,24 @@ const CalloutBadge = ({ t, badgeDivRef, onPointerDown, isSelected, pinIconOpen, 
             {editingLabel ? (
               <input
                 autoFocus
-                value={t.label || ''}
-                onChange={e => onUpdate?.(t.id, { label: e.target.value })}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); setEditingLabel(false); onCollapse?.(); } if (e.key === 'Escape') setEditingLabel(false); }}
-                onBlur={() => setEditingLabel(false)}
+                value={labelDraft}
+                onChange={e => setLabelDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } if (e.key === 'Escape') { setLabelDraft(t.label || ''); setEditingLabel(false); } }}
+                onBlur={() => { const tr = labelDraft.trim(); if (tr !== (t.label || '')) onUpdate?.(t.id, { label: tr }); setEditingLabel(false); }}
                 style={{ ...inputBase, flex: 1, fontSize: '14px', fontWeight: 600, minWidth: 0 }}
               />
             ) : (
               <span
-                onDoubleClick={() => setEditingLabel(true)}
-                title="Double-click to edit"
-                style={{ flex: 1, fontSize: '14px', fontWeight: 600, color: t.label ? P.text : P.textDim, fontFamily: P.font, lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default', minWidth: 0 }}
+                onClick={() => { setLabelDraft(t.label || ''); setEditingLabel(true); }}
+                onMouseEnter={() => setLabelHovered(true)}
+                onMouseLeave={() => setLabelHovered(false)}
+                title="Click to edit"
+                style={{
+                  flex: 1, fontSize: '14px', fontWeight: 600, color: t.label ? P.text : P.textDim, fontFamily: P.font,
+                  lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'text', minWidth: 0,
+                  margin: '-2px -4px', padding: '2px 4px', borderRadius: '4px',
+                  background: labelHovered ? P.divider : 'transparent', transition: 'background 0.1s',
+                }}
               >
                 {t.label || 'Label…'}
               </span>
@@ -806,17 +851,24 @@ const CalloutBadge = ({ t, badgeDivRef, onPointerDown, isSelected, pinIconOpen, 
             {editingDesc ? (
               <textarea
                 autoFocus
-                value={t.description || ''}
-                onChange={e => onUpdate?.(t.id, { description: e.target.value })}
-                onKeyDown={e => { if (e.key === 'Escape') setEditingDesc(false); }}
-                onBlur={() => setEditingDesc(false)}
+                value={descDraft}
+                onChange={e => setDescDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') { setDescDraft(t.description || ''); setEditingDesc(false); } }}
+                onBlur={() => { const tr = descDraft.trim(); if (tr !== (t.description || '')) onUpdate?.(t.id, { description: tr }); setEditingDesc(false); }}
                 style={{ ...inputBase, resize: 'none', fontSize: '13px', lineHeight: '1.6', color: P.text, display: 'block', overflow: 'hidden', minHeight: '20px', height: 'auto', fieldSizing: 'content' }}
               />
             ) : (
               <p
-                onDoubleClick={() => setEditingDesc(true)}
-                title="Double-click to edit"
-                style={{ margin: 0, fontSize: '13px', color: t.description ? P.text : P.textDim, fontFamily: P.font, lineHeight: '1.6', cursor: 'default', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                onClick={() => { setDescDraft(t.description || ''); setEditingDesc(true); }}
+                onMouseEnter={() => setDescHovered(true)}
+                onMouseLeave={() => setDescHovered(false)}
+                title="Click to edit"
+                style={{
+                  margin: '-4px', padding: '4px', borderRadius: '4px',
+                  fontSize: '13px', color: t.description ? P.text : P.textDim, fontFamily: P.font,
+                  lineHeight: '1.6', cursor: 'text', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  background: descHovered ? P.divider : 'transparent', transition: 'background 0.1s',
+                }}
               >
                 {t.description || 'Add a description…'}
               </p>
@@ -828,7 +880,7 @@ const CalloutBadge = ({ t, badgeDivRef, onPointerDown, isSelected, pinIconOpen, 
       {/* Hover label pill */}
       {!isExpanded && showLabel && (
         <div style={{
-          position: 'absolute', left: 'calc(50% + 8px)', top: 0,
+          position: 'absolute', left: 'calc(50% + 4px)', top: 0,
           transform: 'translateY(-50%)', height: '28px',
           display: 'flex', alignItems: 'center',
           background: P.bg, border: `1px solid ${P.border}`,
@@ -848,28 +900,51 @@ const CalloutBadge = ({ t, badgeDivRef, onPointerDown, isSelected, pinIconOpen, 
 
 const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, expandedId, onSetExpanded, onPinViewed, onPinUnviewed, onUpdatePin, onRemove, currentUser, seen = true, highlighted = false }) => {
   const { camera, gl } = useThree();
-  const lineGroupRef  = useRef();   // Three.js group — set .visible imperatively
   const badgeDivRef   = useRef();   // HTML div for badge  — set style.visibility
   const surfaceDivRef = useRef();   // HTML div for anchor — set style.visibility
   const rc = useRef(new THREE.Raycaster());
+  const badgePosRef = useRef(new THREE.Vector3());
+  const dirRef = useRef(new THREE.Vector3());
+  const occlusionFrameRef = useRef(-1); // -1 so the first frame after mount runs immediately
+  const lastVisibleRef = useRef(true); // holds the occlusion result across throttled-away frames
   const renderAboveRef = useRef(renderAbove);
   renderAboveRef.current = renderAbove;
   // Suppress occlusion while a drag is in progress so the pin stays visible
   const dragActiveRef = useRef(false);
   const [bubbleHovered, setBubbleHovered] = useState(false); // default-mode hover preview card
+  const [badgeHovered, setBadgeHovered] = useState(false); // callout-mode badge hover (for z-index boost)
 
   useFrame(() => {
     if (dragActiveRef.current) return;
-    const lineGroup  = lineGroupRef.current;   // null in default (bubble) mode
     const badgeDiv   = badgeDivRef.current;
     const surfaceDiv = surfaceDivRef.current;
     if (!badgeDiv) return;
 
     const setVisible = (vis) => {
-      if (lineGroup) lineGroup.visible = vis;
+      lastVisibleRef.current = vis;
       badgeDiv.style.visibility = vis ? 'visible' : 'hidden';
       if (surfaceDiv) surfaceDiv.style.visibility = vis ? 'visible' : 'hidden';
+      const entry = pinLineOverlayData.current.get(t.id);
+      if (entry) entry.visible = vis;
     };
+
+    // Leader line (callout pins only): projected to screen space every frame — cheap,
+    // just a camera.project() — and drawn by allPinLinesOverlay as plain SVG. See
+    // pinLineOverlayData's own comment for why this isn't a WebGL Three.js Line anymore.
+    if (mode !== 'default') {
+      const rect = gl.domElement.getBoundingClientRect();
+      const toScreen = (world) => {
+        const p = new THREE.Vector3(world[0], world[1], world[2]).project(camera);
+        return { x: rect.left + (p.x + 1) / 2 * rect.width, y: rect.top + (1 - p.y) / 2 * rect.height };
+      };
+      const from = toScreen(surface);
+      const to = toScreen(elevated);
+      pinLineOverlayData.current.set(t.id, {
+        x1: from.x, y1: from.y, x2: to.x, y2: to.y, color: pinColor, visible: lastVisibleRef.current,
+      });
+    } else {
+      pinLineOverlayData.current.delete(t.id);
+    }
 
     if (renderAboveRef.current) { setVisible(true); return; }
 
@@ -877,17 +952,34 @@ const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, ex
     const meshes = shoeModelMeshes.current;
     if (!meshes.length) { setVisible(true); return; }
 
+    // Occlusion is a slow-changing visibility fade, not something that needs checking
+    // every single frame — with every pin (often 6+) each doing its own fresh raycast
+    // against all ~51 mesh objects 60×/sec, this was a substantial *continuous*
+    // main-thread cost, present the whole time any pins are on screen regardless of what
+    // else is happening — the leading contributor to typing feeling laggy / dropping
+    // keystrokes anywhere in the app. Re-check at ~10Hz instead; visibility just holds
+    // its last value on the skipped frames (already carried into the line entry above),
+    // imperceptible for a fade like this.
+    occlusionFrameRef.current = (occlusionFrameRef.current + 1) % 6;
+    if (occlusionFrameRef.current !== 0) return;
+
     // Raycast camera → badge position; occluded if shoe geometry is in the way.
     // In default mode the bubble is pinned at the surface point, so use that.
-    const badgePos = mode === 'default'
-      ? new THREE.Vector3(surface[0], surface[1], surface[2])
-      : new THREE.Vector3(t.x, t.y, t.z);
+    // Reuse scratch vectors instead of allocating new ones every check — with several
+    // pins running this on every (now throttled) tick, fresh Vector3s/clone() calls add
+    // up to steady GC churn that's just as disruptive as the raycast itself.
+    const badgePos = badgePosRef.current;
+    if (mode === 'default') badgePos.set(surface[0], surface[1], surface[2]);
+    else badgePos.set(t.x, t.y, t.z);
     const dist = camera.position.distanceTo(badgePos);
-    rc.current.set(camera.position, badgePos.clone().sub(camera.position).normalize());
+    const dir = dirRef.current.copy(badgePos).sub(camera.position).normalize();
+    rc.current.set(camera.position, dir);
     const hits = rc.current.intersectObjects(meshes, false);
     const occluded = hits.length > 0 && hits[0].distance < dist - 0.05;
     setVisible(!occluded);
   });
+
+  useEffect(() => () => { pinLineOverlayData.current.delete(t.id); }, [t.id]);
 
   const isSelected  = selectedId === t.id;
   const hasCam      = !!t.hasCamera;
@@ -905,17 +997,19 @@ const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, ex
 
   // drei's <Html zIndexRange> only recomputes el.style.zIndex on frames where the projected
   // screen position or camera zoom actually changed (see Html.js's useFrame — the update is
-  // gated behind that check for perf). Opening/closing a thread or hovering a pin changes
-  // neither, so passing a boosted zIndexRange prop alone never reaches the DOM — the element
-  // keeps whatever z-index drei last computed under the *previous* range. Set it ourselves,
-  // imperatively, the moment the boost state changes; drei's own per-frame calc still owns it
-  // the rest of the time (e.g. once the camera moves again after collapsing).
+  // gated behind that check for perf). Opening/closing a thread, or hovering a pin's badge,
+  // changes neither, so passing a boosted zIndexRange prop alone never reaches the DOM — the
+  // element keeps whatever z-index drei last computed under the *previous* range. Set it
+  // ourselves, imperatively, the moment the boost state changes; drei's own per-frame calc
+  // still owns it the rest of the time (e.g. once the camera moves again after collapsing).
+  // Callout mode needed the same treatment as default/comment mode below — its hover-label
+  // pill could otherwise still render on top of a different pin's already-expanded panel.
+  const boosted = mode === 'default' ? (showPreview || isExpanded) : (badgeHovered || isExpanded);
   useEffect(() => {
-    if (mode !== 'default') return;
     const el = badgeDivRef.current?.parentElement?.parentElement;
     if (!el) return;
-    el.style.zIndex = (showPreview || isExpanded) ? '1000' : '';
-  }, [mode, showPreview, isExpanded]);
+    el.style.zIndex = boosted ? '1000' : '';
+  }, [boosted]);
 
   // ── Badge drag: free movement on camera-facing plane ──────────────────────
   const handleBadgePointerDown = (e) => {
@@ -1108,9 +1202,8 @@ const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, ex
 
   return (
     <>
-      <group ref={lineGroupRef}>
-        <LeaderLine surface={surface} elevated={elevated} renderAbove={renderAbove} color={pinColor} />
-      </group>
+      {/* Leader line itself is drawn by allPinLinesOverlay (plain SVG, outside the
+          Canvas) — see pinLineOverlayData's comment. */}
 
       {/* Surface anchor grab handle — transparent hit-area over the dot sphere */}
       <Html position={surface} zIndexRange={[36, 0]} style={{ overflow: 'visible' }}>
@@ -1144,6 +1237,7 @@ const PinLeader = ({ t, renderAbove, selectedId, onSelect, editMode, onFlyTo, ex
           highlighted={highlighted}
           onUpdate={onUpdatePin}
           onCollapse={() => onSetExpanded(null)}
+          onHoverChange={setBadgeHovered}
         />
       </Html>
     </>
@@ -1387,7 +1481,7 @@ const CommentDetailPopup = ({ tooltip, onClose, onUpdate, onDelete, currentUser,
 /* ═══════════════════════════════════════════════════════════════════════════════
    RAYCAST PLANE
    ═══════════════════════════════════════════════════════════════════════════════ */
-const RaycastPlane = ({ onPick, draggingId, onModelClick, onContextMenu, orbitRef }) => {
+const RaycastPlane = ({ onPick, onModelClick, onContextMenu, orbitRef }) => {
   const { gl, camera, scene } = useThree();
   useEffect(() => {
     const canvas = gl.domElement;
@@ -1395,8 +1489,14 @@ const RaycastPlane = ({ onPick, draggingId, onModelClick, onContextMenu, orbitRe
     const handleMouseDown = (e) => { downX = e.clientX; downY = e.clientY; };
     const guardedClick = (e) => {
       const dx = e.clientX - downX, dy = e.clientY - downY;
+      // A genuine badge/anchor drag never reaches this: handleBadgePointerDown and
+      // handleSurfacePointerDown stopImmediatePropagation on their own pointerdown, so
+      // this click handler only ever sees clicks that started on the canvas itself — the
+      // >5px distance check above is already the complete "was this a drag" guard.
+      // A separate `if (draggingId) return` used to also block clicks here whenever *any*
+      // pin was selected — but handleAddTooltip selects every pin it just created, so
+      // that left placing a second pin dead until the first was explicitly deselected.
       if (Math.sqrt(dx * dx + dy * dy) > 5) return;
-      if (draggingId) return;
       const rect = canvas.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -1431,7 +1531,7 @@ const RaycastPlane = ({ onPick, draggingId, onModelClick, onContextMenu, orbitRe
     canvas.addEventListener('click', guardedClick);
     canvas.addEventListener('contextmenu', handleContextMenu);
     return () => { canvas.removeEventListener('mousedown', handleMouseDown); canvas.removeEventListener('click', guardedClick); canvas.removeEventListener('contextmenu', handleContextMenu); };
-  }, [gl, camera, scene, onPick, draggingId, onModelClick, onContextMenu]);
+  }, [gl, camera, scene, onPick, onModelClick, onContextMenu]);
   return null;
 };
 
@@ -1769,8 +1869,11 @@ const CommentFloatingPanel = ({ point, onAdd, onClear, nextNumber, currentUser }
   // upward from that same Y via translateY(-100%) — same relationship, so the composer
   // never overlaps the marker no matter where on screen the click landed.
   const clampX = (raw) => Math.max(8, Math.min(raw, window.innerWidth - 308));
+  // Gap from the marker's own screen point — was 24px, which the badge's own width ate
+  // into enough that the composer visually overlapped it rather than sitting clear.
+  const GAP = 40;
   const [pos, setPos] = useState(() => ({
-    x: clampX((point?.screenX ?? window.innerWidth / 2) + 24),
+    x: clampX((point?.screenX ?? window.innerWidth / 2) + GAP),
     y: Math.max(60, point?.screenY ?? window.innerHeight / 2),
   }));
   const taRef = useRef(null);
@@ -1778,7 +1881,7 @@ const CommentFloatingPanel = ({ point, onAdd, onClear, nextNumber, currentUser }
   useEffect(() => { setDescription(''); setTimeout(() => taRef.current?.focus(), 50); }, [point]);
   useEffect(() => {
     if (point) setPos({
-      x: clampX((point.screenX ?? window.innerWidth / 2) + 24),
+      x: clampX((point.screenX ?? window.innerWidth / 2) + GAP),
       y: Math.max(60, point.screenY ?? window.innerHeight / 2),
     });
   }, [point?.screenX, point?.screenY]);
@@ -1794,7 +1897,11 @@ const CommentFloatingPanel = ({ point, onAdd, onClear, nextNumber, currentUser }
 
   return (
     <div style={{
-      position: 'fixed', left: pos.x, top: pos.y, transform: 'translateY(-100%)', zIndex: 45,
+      // While actively placing, this must win over the Feedback side panel (a fixed-
+      // position DOM element around z-index 150) the same way the callout quick-add pill
+      // already does — z-index 45 was getting buried under it, as seen with a comment
+      // placed near the panel's edge.
+      position: 'fixed', left: pos.x, top: pos.y, transform: 'translateY(-100%)', zIndex: 1000,
       width: '280px', background: UI.glass, border: `1px solid ${UI.glassBorder}`,
       borderRadius: UI.radius, boxShadow: UI.panelShadow,
       backdropFilter: UI.glassBlur, WebkitBackdropFilter: UI.glassBlur,
@@ -3448,7 +3555,7 @@ const CalloutTopDock = ({ active, number, color, buttonRef }) => {
           lineEl.setAttribute('y1', fromY);
           lineEl.setAttribute('x2', proj.x);
           lineEl.setAttribute('y2', proj.y);
-          lineEl.style.opacity = '0.55';
+          lineEl.style.opacity = '0.8';
         } else {
           lineEl.style.opacity = '0';
         }
@@ -3464,7 +3571,7 @@ const CalloutTopDock = ({ active, number, color, buttonRef }) => {
   return (
     <>
       <svg style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', pointerEvents: 'none', zIndex: 40 }}>
-        <line ref={lineRef} stroke={color} strokeWidth="1.5" strokeDasharray="4 5" opacity="0" style={{ transition: 'opacity 0.18s ease' }} />
+        <line ref={lineRef} stroke="#D6D6DA" strokeWidth="1.5" opacity="0" style={{ transition: 'opacity 0.18s ease' }} />
       </svg>
       <div ref={wrapRef} style={{ position: 'fixed', left: 0, top: 0, transform: 'translate(-50%, -100%)', zIndex: 41 }}>
         <div
@@ -3532,6 +3639,110 @@ const DropAnimBadge = ({ from, to, number, color, onDone }) => {
     }}>
       {number}
     </div>
+  );
+};
+
+/* Plain SVG duplicate of the leader line for whichever callout is currently being placed,
+   drawn outside the Canvas so it can sit above other DOM UI (the Feedback panel, other
+   pins) — the real Three.js Line is WebGL content baked into the canvas, which sits at a
+   low CSS z-index no per-object setting can lift. Always mounted; invisible whenever
+   newPinLineProjection is null (no callout currently being placed). rAF-driven like the
+   other cursor-tracking overlays, not React state, so it can update every frame for free. */
+const NewPinLineOverlay = () => {
+  const lineRef = useRef(null);
+
+  useEffect(() => {
+    let raf;
+    const tick = () => {
+      const el = lineRef.current;
+      const proj = newPinLineProjection.current;
+      if (el) {
+        if (proj) {
+          el.setAttribute('x1', proj.x1);
+          el.setAttribute('y1', proj.y1);
+          el.setAttribute('x2', proj.x2);
+          el.setAttribute('y2', proj.y2);
+          el.setAttribute('stroke', proj.color);
+          el.style.opacity = '1';
+        } else {
+          el.style.opacity = '0';
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <svg style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', pointerEvents: 'none', zIndex: 160 }}>
+      <line ref={lineRef} strokeWidth="1.5" opacity="0" />
+    </svg>
+  );
+};
+
+/* Leader line + surface dot for every *placed* callout pin, all in one plain SVG overlay
+   outside the Canvas — same rationale as newPinLineOverlay just above, extended to the
+   permanent pins: PinLeader's useFrame projects each pin's line into pinLineOverlayData
+   every frame, this reads that map via its own rAF loop and draws it. Pins are added/
+   removed rarely, so React state only tracks *which ids exist* (to mount/unmount the
+   right <line>/<circle> pairs); their x/y/color/visibility update by direct DOM attribute
+   writes on every tick, same as the rest of this file's cursor-tracking overlays. */
+const AllPinLinesOverlay = () => {
+  const [ids, setIds] = useState([]);
+  const idsRef = useRef([]);
+  const elRefs = useRef(new Map()); // pinId -> { line, dot }
+
+  useEffect(() => {
+    let raf;
+    const tick = () => {
+      const currentIds = Array.from(pinLineOverlayData.current.keys());
+      const prev = idsRef.current;
+      const changed = currentIds.length !== prev.length || currentIds.some((id, i) => id !== prev[i]);
+      if (changed) {
+        idsRef.current = currentIds;
+        setIds(currentIds);
+      }
+      pinLineOverlayData.current.forEach((data, id) => {
+        const refs = elRefs.current.get(id);
+        if (!refs) return;
+        const opacity = data.visible ? '1' : '0';
+        if (refs.line) {
+          refs.line.setAttribute('x1', data.x1);
+          refs.line.setAttribute('y1', data.y1);
+          refs.line.setAttribute('x2', data.x2);
+          refs.line.setAttribute('y2', data.y2);
+          refs.line.setAttribute('stroke', data.color);
+          refs.line.style.opacity = opacity;
+        }
+        if (refs.dot) {
+          refs.dot.setAttribute('cx', data.x1);
+          refs.dot.setAttribute('cy', data.y1);
+          refs.dot.setAttribute('fill', data.color);
+          refs.dot.style.opacity = opacity;
+        }
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <svg style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', pointerEvents: 'none', zIndex: 5 }}>
+      {ids.map(id => (
+        <g key={id}>
+          <line
+            ref={el => { if (!el) { elRefs.current.delete(id); return; } const r = elRefs.current.get(id) || {}; r.line = el; elRefs.current.set(id, r); }}
+            strokeWidth="1.5"
+          />
+          <circle
+            ref={el => { if (!el) return; const r = elRefs.current.get(id) || {}; r.dot = el; elRefs.current.set(id, r); }}
+            r="2.5"
+          />
+        </g>
+      ))}
+    </svg>
   );
 };
 
@@ -4937,64 +5148,52 @@ const FeedbackPanel = ({ tooltips, open, onOpenChange, onFlyTo, onRemove, onColo
           </button>
         </div>
 
-        {/* Segmented control */}
-        <div style={{ display: 'flex', gap: '4px', padding: '4px 8px', flexShrink: 0 }}>
-          {[
-            { id: 'comments', label: `Comments (${comments.length})` },
-            { id: 'callouts', label: `Callouts (${callouts.length})` },
-          ].map(tab => {
-            const isActive = activeTab === tab.id;
+        {/* Segmented control — compact tab chips + a single visibility toggle for
+            whichever tab is active, matching Figma "Segmented control 2"
+            (node 86:7484 / 86:7493). Replaces the old full-width pill tabs and the
+            two separate "N callouts/comments" count rows the eye button used to live
+            in on its own — the toggle now sits inline with the tabs instead. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+            {[
+              { id: 'comments', label: `Comments (${comments.length})` },
+              { id: 'callouts', label: `Callouts (${callouts.length})` },
+            ].map(tab => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onMouseDown={e => e.stopPropagation()}
+                  onClick={() => onChangeTab?.(tab.id)}
+                  style={{
+                    height: '20px', padding: '0 4px', borderRadius: '4px', border: 'none', cursor: 'pointer',
+                    background: isActive ? 'var(--color-background-bolder-default)' : 'transparent',
+                    color: isActive ? 'var(--color-text-default)' : 'var(--color-text-subtle)',
+                    fontSize: '12px', fontWeight: isActive ? 500 : 400, fontFamily: "'Inter', sans-serif", lineHeight: '16px',
+                    textTransform: 'uppercase', whiteSpace: 'nowrap',
+                    transition: 'background 0.12s, color 0.12s',
+                  }}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+          {(() => {
+            const isCallouts = activeTab === 'callouts';
+            const hidden = isCallouts ? allHidden : commentsAllHidden;
+            const toggle = isCallouts ? onToggleAllHidden : onToggleCommentsAllHidden;
             return (
-              <button
-                key={tab.id}
-                onMouseDown={e => e.stopPropagation()}
-                onClick={() => onChangeTab?.(tab.id)}
-                style={{
-                  flex: 1, padding: '8px', borderRadius: '8px', border: 'none', cursor: 'pointer',
-                  background: isActive ? 'var(--color-background-inverse)' : 'var(--color-background-subtle-default)',
-                  color: isActive ? '#000000' : 'var(--color-text-default)',
-                  fontSize: '12px', fontWeight: 500, fontFamily: "'Inter', sans-serif", lineHeight: '16px',
-                  textTransform: 'uppercase',
-                  transition: 'background 0.12s, color 0.12s',
-                }}
+              <button onMouseDown={e => e.stopPropagation()} onClick={toggle} title={hidden ? 'Show all' : 'Hide all'}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '15px', height: '15px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', color: hidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)', flexShrink: 0 }}
+                onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
+                onMouseLeave={e => e.currentTarget.style.color = hidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)'}
               >
-                {tab.label}
+                {hidden ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             );
-          })}
+          })()}
         </div>
-
-        {/* Callouts count row — only on the Callouts tab */}
-        {activeTab === 'callouts' && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px 8px', flexShrink: 0 }}>
-            <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--color-text-subtle)', fontFamily: "'Inter', sans-serif", lineHeight: '16px' }}>
-              {allHidden ? `${callouts.length} callouts hidden` : `${callouts.length} callouts`}
-            </span>
-            <button onMouseDown={e => e.stopPropagation()} onClick={onToggleAllHidden} title={allHidden ? 'Show all' : 'Hide all'}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', color: allHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)' }}
-              onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
-              onMouseLeave={e => e.currentTarget.style.color = allHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)'}
-            >
-              {allHidden ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-          </div>
-        )}
-
-        {/* Comments count row — only on the Comments tab */}
-        {activeTab === 'comments' && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px 8px', flexShrink: 0 }}>
-            <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--color-text-subtle)', fontFamily: "'Inter', sans-serif", lineHeight: '16px' }}>
-              {commentsAllHidden ? `${comments.length} comments hidden` : `${comments.length} comments`}
-            </span>
-            <button onMouseDown={e => e.stopPropagation()} onClick={onToggleCommentsAllHidden} title={commentsAllHidden ? 'Show all' : 'Hide all'}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: 'none', padding: 0, background: 'none', cursor: 'pointer', color: commentsAllHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)' }}
-              onMouseEnter={e => e.currentTarget.style.color = 'var(--color-icon-default)'}
-              onMouseLeave={e => e.currentTarget.style.color = commentsAllHidden ? 'var(--color-icon-default)' : 'var(--color-icon-subtle)'}
-            >
-              {commentsAllHidden ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-          </div>
-        )}
 
         {/* Comments tab */}
         {activeTab === 'comments' && (
@@ -6919,8 +7118,23 @@ const useCameraFlyTo = (orbitRef) => {
     const controls = orbitRef.current;
     const cam = controls.object;
     const endTarget = new THREE.Vector3(...targetArr);
-    const currentDir = cam.position.clone().sub(controls.target).normalize();
-    const endPos = endTarget.clone().add(currentDir.multiplyScalar(zoomDistance));
+    // Used to always approach from the CURRENT viewing direction, just re-centered and
+    // zoomed in — so a comment on the underside of the sole stayed hidden behind the
+    // shoe body if you were viewing from above, no matter how close you flew: zooming in
+    // along the same angle doesn't reveal a point that angle can't see at all.
+    // Approach from outside the model instead, roughly along the line from its bounding-
+    // box center through the target point — for a point on the sole, that direction
+    // already points downward, so the camera ends up under the shoe looking up at it.
+    let dir = null;
+    if (shoeModelMeshes.current.length) {
+      const box = new THREE.Box3();
+      shoeModelMeshes.current.forEach(m => box.expandByObject(m));
+      const center = box.getCenter(new THREE.Vector3());
+      const toTarget = endTarget.clone().sub(center);
+      if (toTarget.lengthSq() > 1e-6) dir = toTarget.normalize();
+    }
+    if (!dir) dir = cam.position.clone().sub(controls.target).normalize();
+    const endPos = endTarget.clone().add(dir.multiplyScalar(zoomDistance));
     flyTo(endPos.toArray(), targetArr, duration);
   };
   return { flyTo, flyToTarget };
@@ -7222,7 +7436,7 @@ export default function App() {
   const redlineMode = annotationMode && activeTool === 'pencil';
   const penMode = annotationMode && activeTool === 'pen';
   const reviewMode = annotationMode; // reviewMode = annotationMode for legacy Canvas code
-  const [redlineColor, setRedlineColor] = useState('#e5484d');
+  const [redlineColor, setRedlineColor] = useState('#6530F7'); // Blueberry — default colour for new comment/callout pins
   const [penColor, setPenColor] = useState('#e5484d');     // pen colour — independent of pencil
   const [pencilColor, setPencilColor] = useState('#e5484d'); // pencil colour — independent of pen
   const [redlineWidth, setRedlineWidth] = useState(1.0);
@@ -8013,7 +8227,11 @@ export default function App() {
   const handleUpdateTooltip = (id, patch) => { setTooltips(prev => prev.map(t => t.id === id ? { ...t, ...patch } : t)); };
 
   const handleFlyTo = useCallback((tooltip) => {
-    if (!tooltip.hasCamera && !tooltip.cameraView) return;
+    // Used to bail out entirely here when a tooltip had no saved camera view — meaning
+    // clicking a comment row in the Feedback panel did nothing if the pin happened to be
+    // occluded by the model from the current angle, with no way to reveal it. Now it
+    // always flies somewhere useful: the saved view if there is one, otherwise straight
+    // toward the pin's own position.
     if (activeFlyId === tooltip.id) {
       setActiveFlyId(null);
       flyTo(DEFAULT_CAMERA.position, DEFAULT_CAMERA.target, 1000);
@@ -8882,7 +9100,6 @@ export default function App() {
               }
               return { ...raw, surfaceX: raw.x, surfaceY: raw.y, surfaceZ: raw.z, y: commentMode === 'callout' ? raw.y + LEADER_LIFT : raw.y };
             }) : () => {}}
-            draggingId={draggingId}
             onModelClick={() => {}}
             onContextMenu={handleContextMenuOpen}
             orbitRef={orbitRef}
@@ -8987,6 +9204,9 @@ export default function App() {
         />
 
       </Canvas>
+
+      <AllPinLinesOverlay />
+      <NewPinLineOverlay />
 
       <CalloutTopDock
         active={editMode && commentMode === 'callout' && !clickPoint && !presentationMode}

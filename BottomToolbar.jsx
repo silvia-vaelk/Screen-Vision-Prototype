@@ -166,9 +166,10 @@ export default function BottomToolbar({
   const setDrawColor = penVariant === 'pencil' ? setPencilColor : setPenColor;
 
   /* ── Tool group: 58×40 unit (40×40 icon button + 18px chevron) ── */
-  const ToolGroup = ({ id, active, icon, onMain }) => (
+  const ToolGroup = ({ id, active, icon, onMain, mainRef }) => (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '58px', height: '40px', flexShrink: 0 }}>
       <button
+        ref={mainRef}
         title={id}
         onClick={() => { onMain?.(); setOpenMenu(null); }}
         style={{
@@ -401,8 +402,8 @@ export default function BottomToolbar({
             )}
           </div>
 
-          <div ref={commentButtonRef} style={{ position: 'relative' }}>
-            <ToolGroup id="comment" active={commentActive}
+          <div style={{ position: 'relative' }}>
+            <ToolGroup id="comment" active={commentActive} mainRef={commentButtonRef}
               icon={commentVariant === 'callout' ? <CalloutGlyph size={ICON} /> : <MessageSquare size={ICON} />}
               onMain={() => onSelectComment?.(commentVariant)} />
             {openMenu === 'comment' && (
