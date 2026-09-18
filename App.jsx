@@ -4,9 +4,10 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Html, ContactShadows, Line, TransformControls, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { MessageSquare as NotesIcon, PenTool as SketchIcon, Check, X as XIcon, ChevronRight, MoreHorizontal, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { MessageSquare as NotesIcon, PenTool as SketchIcon, MousePointer2, Camera as CameraIcon, Pencil, Check, X as XIcon, ChevronRight, MoreHorizontal, Eye, EyeOff, Trash2, Keyboard, Box as CubeIcon } from 'lucide-react';
 import LayersDrawer from './LayersDrawer.jsx';
-import BottomToolbar, { PALETTE as BTB_PALETTE, ThicknessControl } from './BottomToolbar.jsx';
+import BottomToolbar, { PALETTE as BTB_PALETTE, ThicknessControl, CalloutGlyph, SectionGlyph, LaserGlyph } from './BottomToolbar.jsx';
+import ToolBelt from './ToolBelt.jsx';
 import { DS } from './tokens.js';
 import ViewpointCube from './ViewpointCube.jsx';
 import ViewpointCubeV2 from './ViewpointCubeV2.jsx';
@@ -39,6 +40,90 @@ const ThemeToggle = () => {
     >
       {dark ? '☀️' : '🌙'}
     </button>
+  );
+};
+
+/* Interaction-discoverability button — sits just below the theme toggle.
+   Surfaces the two hold-key gestures (G = viewpoint cube, B = ToolBelt) that
+   have no other visible affordance, plus the ToolBelt's flat/3D icon-style
+   choice, so it isn't buried inside the radial itself. */
+const KeyBadge = ({ children }) => (
+  <span style={{
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '20px',
+    height: '20px', padding: '0 5px', borderRadius: '5px', background: 'var(--color-overlay-medium)',
+    color: 'var(--color-text-default)', fontFamily: DS.mono, fontSize: '11px', fontWeight: 600,
+  }}>{children}</span>
+);
+
+const ShortcutsButton = ({ iconStyle, onChangeIconStyle }) => {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onEsc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onEsc);
+    return () => { window.removeEventListener('pointerdown', onDown); window.removeEventListener('keydown', onEsc); };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} style={{ position: 'fixed', bottom: '16px', right: '16px', zIndex: 9999 }}>
+      {open && (
+        <div style={{
+          position: 'absolute', bottom: 'calc(100% + 10px)', right: 0, width: '240px',
+          background: DS.surface, borderRadius: '12px', padding: '10px',
+          boxShadow: DS.shadowLg, animation: 'calloutFadeIn 0.12s ease',
+        }}>
+          <div style={{ fontFamily: DS.font, fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-text-subtle)', padding: '2px 6px 8px' }}>
+            Hold-key shortcuts
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px' }}>
+            <CubeIcon size={16} color="var(--color-icon-subtle)" />
+            <span style={{ flex: 1, fontFamily: DS.font, fontSize: '13px', color: 'var(--color-text-default)' }}>Navigation cube</span>
+            <KeyBadge>G</KeyBadge>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px' }}>
+            <MousePointer2 size={16} color="var(--color-icon-subtle)" />
+            <span style={{ flex: 1, fontFamily: DS.font, fontSize: '13px', color: 'var(--color-text-default)' }}>Tool switcher</span>
+            <KeyBadge>B</KeyBadge>
+          </div>
+          <div style={{ height: '1px', background: DS.divider, margin: '8px 4px' }} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 6px 6px' }}>
+            <span style={{ fontFamily: DS.font, fontSize: '13px', color: 'var(--color-text-default)' }}>Tool switcher icons</span>
+            <div style={{ display: 'flex', gap: '2px', background: 'var(--color-overlay-subtle)', borderRadius: '8px', padding: '3px' }}>
+              {['flat', '3d'].map((s) => (
+                <button
+                  key={s}
+                  onClick={() => onChangeIconStyle(s)}
+                  style={{
+                    border: 'none', cursor: 'pointer', borderRadius: '5px', padding: '5px 10px',
+                    fontFamily: DS.font, fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                    background: iconStyle === s ? 'var(--color-background-bolder-default)' : 'transparent',
+                    color: iconStyle === s ? 'var(--color-text-default)' : 'var(--color-text-subtle)',
+                  }}
+                >
+                  {s === 'flat' ? 'Flat' : '3D'}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      <button
+        onClick={() => setOpen(v => !v)}
+        title="Interaction shortcuts"
+        style={{
+          width: '36px', height: '36px', borderRadius: '10px', border: 'none',
+          background: open ? DS.accent : 'rgba(128,128,128,0.25)', backdropFilter: 'blur(8px)',
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'background 0.2s',
+        }}
+      >
+        <Keyboard size={18} color={open ? DS.white : 'var(--color-icon-default)'} />
+      </button>
+    </div>
   );
 };
 
@@ -84,6 +169,9 @@ const DEFAULT_SCENE = {
 
 const DEFAULT_CAMERA = { position: [3, 2.5, 4], target: [0, 1.0, 0] };
 const AXIS_COLORS = { x: '#e05a5a', y: '#6abf7b', z: '#5b8fe0' };
+// Order of the hold-B radial ToolBelt's chips — the 4 BottomToolbar groups plus
+// Laser pointer (a Select variant, but shown flat here like the earlier prototype).
+const TOOLBELT_IDS = ['select', 'laser', 'pen', 'comment', 'camera'];
 const SEEN_PINS_STORAGE_KEY = '3d-viewer-seen-pin-ids';
 
 /** Data-URL cursors for Comments mode (hotspot x y in px, then CSS fallback). */
@@ -7326,16 +7414,19 @@ const ViewpointsBar = ({
                   )}
                 </div>
 
-                {/* Name tooltip on hover */}
+                {/* Name tooltip on hover — was DS.surface (theme-adaptive, white in light
+                    mode) paired with DS.white text, so it rendered as a blank white pill
+                    in light mode. Same fixed dark pill the Layers panel's name tooltip
+                    uses, so it reads regardless of theme. */}
                 {hoveredId === vp.id && !isRenaming && !contextMenu && dragFrom === null && (
-                  <div style={{ position: 'absolute', top: 'calc(100% + 18px)', left: '50%', transform: 'translateX(-50%)', background: DS.surface, borderRadius: '16px', padding: '8px 12px', fontFamily: FONT, fontSize: '12px', fontWeight: 600, color: DS.white, whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 10, boxShadow: '0 4px 8px rgba(16,24,40,0.1)' }}>
+                  <div style={{ position: 'absolute', top: 'calc(100% + 18px)', left: '50%', transform: 'translateX(-50%)', background: 'var(--color-greys-900)', borderRadius: '16px', padding: '8px 12px', fontFamily: FONT, fontSize: '12px', fontWeight: 600, color: '#ffffff', whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 10, boxShadow: '0 4px 8px rgba(16,24,40,0.1)' }}>
                     {vp.name}
                   </div>
                 )}
 
-                {/* Rename input */}
+                {/* Rename input — same fix, was white-on-white in light mode */}
                 {isRenaming && (
-                  <div style={{ position: 'absolute', top: 'calc(100% + 18px)', left: '50%', transform: 'translateX(-50%)', background: DS.surface, borderRadius: '16px', padding: '6px 12px', zIndex: 10, boxShadow: '0 4px 8px rgba(16,24,40,0.1)' }}>
+                  <div style={{ position: 'absolute', top: 'calc(100% + 18px)', left: '50%', transform: 'translateX(-50%)', background: 'var(--color-greys-900)', borderRadius: '16px', padding: '6px 12px', zIndex: 10, boxShadow: '0 4px 8px rgba(16,24,40,0.1)' }}>
                     <input
                       autoFocus
                       data-rename-input="1"
@@ -7343,7 +7434,7 @@ const ViewpointsBar = ({
                       onChange={e => setRenameVal(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitRename(); } if (e.key === 'Escape') { e.preventDefault(); setRenamingId(null); } }}
                       onPointerDown={e => e.stopPropagation()}
-                      style={{ background: 'none', border: 'none', outline: 'none', padding: 0, fontFamily: FONT, fontSize: '12px', fontWeight: 600, color: DS.white, width: Math.max(80, renameVal.length * 8) + 'px', display: 'block' }}
+                      style={{ background: 'none', border: 'none', outline: 'none', padding: 0, fontFamily: FONT, fontSize: '12px', fontWeight: 600, color: '#ffffff', width: Math.max(80, renameVal.length * 8) + 'px', display: 'block' }}
                     />
                   </div>
                 )}
@@ -7357,13 +7448,14 @@ const ViewpointsBar = ({
           const vp = viewpoints.find(v => v.id === contextMenu.id);
           if (!vp) return null;
           return createPortal(
-            <div onPointerDown={e => e.stopPropagation()} style={{ position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 200, background: DS.surface, borderRadius: '12px', padding: '8px 0', boxShadow: '0 12px 16px rgba(16,24,40,0.08)', minWidth: '102px' }}>
+            // Same white-on-white bug as the hover tooltip above — fixed dark surface.
+            <div onPointerDown={e => e.stopPropagation()} style={{ position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 200, background: 'var(--color-greys-900)', borderRadius: '12px', padding: '8px 0', boxShadow: '0 12px 16px rgba(16,24,40,0.08)', minWidth: '102px' }}>
               {[
                 { label: 'Rename', action: () => { setRenamingId(vp.id); setRenameVal(vp.name); setContextMenu(null); } },
                 { label: 'Delete', action: () => { setViewpoints(vps => vps.filter(v => v.id !== vp.id)); setContextMenu(null); } },
               ].map(({ label, action }) => (
                 <div key={label} onPointerDown={e => { e.stopPropagation(); action(); }}
-                  style={{ height: '32px', display: 'flex', alignItems: 'center', padding: '8px 16px', cursor: 'pointer', borderRadius: '8px', fontFamily: "'Noto Sans', sans-serif", fontSize: '12px', fontWeight: 400, color: DS.white, lineHeight: '18px' }}
+                  style={{ height: '32px', display: 'flex', alignItems: 'center', padding: '8px 16px', cursor: 'pointer', borderRadius: '8px', fontFamily: "'Noto Sans', sans-serif", fontSize: '12px', fontWeight: 400, color: '#ffffff', lineHeight: '18px' }}
                   onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 >{label}</div>
@@ -7477,6 +7569,16 @@ export default function App() {
   const [activeMode, setActiveMode] = useState(DEFAULT_MODE);
   useEffect(() => { activeModeRef.current = activeMode; }, [activeMode]);
   const [presentationMode, setPresentationMode] = useState(false);
+  // Hold-B radial ToolBelt — centered tool picker (see effect below for the hold/
+  // scroll-through/commit interaction, ported from the earlier prototypes' ModeBar).
+  const [toolbeltOpen, setToolbeltOpen] = useState(false);
+  const [toolbeltHover, setToolbeltHover] = useState(null);
+  // 'flat' = current lucide icon set, '3d' = the earlier prototypes' rendered icon
+  // pack (tool-selection.png, Icon5/6.svg/png, pen-black.png…) — toggled live from
+  // inside the bar so both can be compared without closing it.
+  const [toolbeltIconStyle, setToolbeltIconStyle] = useState('flat');
+  const toolbeltHeldRef = useRef(false);
+  const toolbeltCommittedRef = useRef(false);
   const [presViewIndex, setPresViewIndex] = useState(0);
   const [presAutoPlay, setPresAutoPlay] = useState(false);
   const [atViewpoint, setAtViewpoint] = useState(false);
@@ -7690,6 +7792,99 @@ export default function App() {
     setAutoRotate(false);
     setClickPoint(null);
   }, []);
+
+  // Applies whichever chip is highlighted when the ToolBelt is released — same
+  // entry points as BottomToolbar's own main-button clicks, so a hold-B commit
+  // and a toolbar click land in identical state.
+  const commitToolbelt = useCallback((id) => {
+    if (id === 'select') { setAnnotationMode(false); setCameraTool(false); setActiveMode('navigation'); }
+    else if (id === 'laser') selectLaser();
+    else if (id === 'pen') selectDrawing();
+    else if (id === 'comment') selectComment(commentMode);
+    else if (id === 'camera') { setAnnotationMode(false); setCameraTool(true); }
+  }, [selectLaser, selectDrawing, selectComment, commentMode]);
+
+  // Hold B → ToolBelt opens centered; move the mouse or arrow keys to scroll
+  // through the 4 tools; release B (or click) to commit whichever is highlighted.
+  useEffect(() => {
+    const isTypingTarget = () => {
+      const el = document.activeElement;
+      const tag = el?.tagName?.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || el?.isContentEditable;
+    };
+    const stepHover = (delta) => {
+      setToolbeltHover(cur => {
+        const curIdx = TOOLBELT_IDS.indexOf(cur);
+        const base = curIdx < 0 ? 0 : curIdx;
+        const next = Math.max(0, Math.min(TOOLBELT_IDS.length - 1, base + delta));
+        return TOOLBELT_IDS[next];
+      });
+    };
+    const onKeyDown = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || presentationMode || isTypingTarget()) return;
+      if (e.code === 'KeyB' && !e.repeat) {
+        e.preventDefault();
+        toolbeltHeldRef.current = true;
+        toolbeltCommittedRef.current = false;
+        setToolbeltHover(null);
+        setToolbeltOpen(true);
+        return;
+      }
+      if (toolbeltHeldRef.current && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+        e.preventDefault();
+        stepHover(e.code === 'ArrowRight' ? 1 : -1);
+      }
+    };
+    const onKeyUp = (e) => {
+      if (e.code !== 'KeyB' || !toolbeltHeldRef.current || toolbeltCommittedRef.current) return;
+      toolbeltHeldRef.current = false;
+      setToolbeltHover(cur => { if (cur) commitToolbelt(cur); return null; });
+      setToolbeltOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+  }, [presentationMode, commitToolbelt]);
+
+  // Click anywhere while B is held → commit immediately (alternative to releasing B).
+  useEffect(() => {
+    const onPointerDown = () => {
+      if (!toolbeltHeldRef.current) return;
+      toolbeltHeldRef.current = false;
+      toolbeltCommittedRef.current = true;
+      setToolbeltHover(cur => { if (cur) commitToolbelt(cur); return null; });
+      setToolbeltOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [commitToolbelt]);
+
+  // Mouse movement while open — delta-based: any left/right movement steps
+  // through the tools, same feel as the arrow keys.
+  useEffect(() => {
+    if (!toolbeltOpen) return;
+    let lastX = null;
+    let accumDx = 0;
+    // Roughly the on-screen distance between two chips — was 30px, which meant a
+    // small wrist twitch skipped past the tool you meant to land on.
+    const STEP_PX = 80;
+    const onMove = (e) => {
+      if (lastX === null) { lastX = e.clientX; return; }
+      accumDx += e.clientX - lastX;
+      lastX = e.clientX;
+      const steps = Math.trunc(accumDx / STEP_PX);
+      if (steps === 0) return;
+      accumDx -= steps * STEP_PX;
+      setToolbeltHover(cur => {
+        const curIdx = TOOLBELT_IDS.indexOf(cur);
+        const base = curIdx < 0 ? 0 : curIdx;
+        const next = Math.max(0, Math.min(TOOLBELT_IDS.length - 1, base + steps));
+        return TOOLBELT_IDS[next];
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    return () => { window.removeEventListener('pointermove', onMove); setToolbeltHover(null); };
+  }, [toolbeltOpen]);
 
   const selectedEmojiRef = useRef(selectedEmoji);
   useEffect(() => { selectedEmojiRef.current = selectedEmoji; }, [selectedEmoji]);
@@ -8767,6 +8962,42 @@ export default function App() {
           commentButtonRef={commentToolBtnRef}
         />
       )}
+
+      {!presentationMode && (() => {
+        const penVariantNow = (activeTool === 'pen' || activeTool === 'pencil') ? activeTool : (lastDrawToolRef.current || 'pen');
+        const is3D = toolbeltIconStyle === '3d';
+        return (
+          <ToolBelt
+            open={toolbeltOpen}
+            hovered={toolbeltHover}
+            onHover={setToolbeltHover}
+            onCommit={commitToolbelt}
+            modes={[
+              { id: 'select', label: 'Select', icon: is3D ? `${BASE}/icons/tool-selection-hover.png` : MousePointer2 },
+              { id: 'laser', label: 'Laser pointer', icon: is3D ? `${BASE}/icons/tool-laser-hover.png` : LaserGlyph },
+              {
+                id: 'pen',
+                label: penVariantNow === 'pencil' ? 'Pencil' : 'Pen',
+                icon: is3D
+                  ? (penVariantNow === 'pencil' ? `${BASE}/icons/pencil-black.png` : `${BASE}/icons/pen-black.png`)
+                  : (penVariantNow === 'pencil' ? Pencil : SketchIcon),
+              },
+              {
+                id: 'comment', label: commentMode === 'callout' ? 'Callout' : 'Comment',
+                icon: is3D ? `${BASE}/icons/Icon6.png` : (commentMode === 'callout' ? CalloutGlyph : NotesIcon),
+                iconScale: is3D ? 0.55 : undefined,
+              },
+              {
+                id: 'camera', label: cameraVariant === 'section' ? 'Section' : 'Camera',
+                icon: is3D ? `${BASE}/icons/Icon5.svg` : (cameraVariant === 'section' ? SectionGlyph : CameraIcon),
+                iconScale: is3D ? 0.48 : undefined,
+              },
+            ]}
+          />
+        );
+      })()}
+
+      <ShortcutsButton iconStyle={toolbeltIconStyle} onChangeIconStyle={setToolbeltIconStyle} />
 
       {/* Click-outside dismissal for centered popups */}
       {(cubePopup.open && cubePopup.centered) ? (
