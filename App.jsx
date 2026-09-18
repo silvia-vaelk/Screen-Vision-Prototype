@@ -8313,10 +8313,19 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKey);
     window.addEventListener('blur', onBlur);
+    // Second safety net for the same "lost focus mid-hold" case: macOS's own
+    // Cmd+Shift+5 screen-recording shortcut includes Shift, so the page sees
+    // Shift keydown, then macOS's global hotkey handler grabs focus for the
+    // recording overlay before the matching keyup ever arrives — window blur
+    // doesn't reliably fire for that overlay, but the mouse always has to
+    // physically leave the page to reach it, so mouseleave on the document
+    // catches it too.
+    document.addEventListener('mouseleave', onBlur);
     return () => {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKey);
       window.removeEventListener('blur', onBlur);
+      document.removeEventListener('mouseleave', onBlur);
     };
   }, []);
 
