@@ -220,6 +220,21 @@ const CURSOR_COMMENT_HOVER = fileCursor('comment_unfilled.svg', 5, 21);
 const CURSOR_COMMENT_PLACE = `url("${BASE}/cursors/cursor-comment.svg") 2 15, crosshair`;
 const CURSOR_TEXT = `url("${BASE}/icons/text_cursor.svg") 12 4, text`;
 
+// Every cursor effect in this file re-applies its custom `url(...)` cursor on
+// every pointermove — dozens of times a second. Reassigning a custom-image
+// cursor to the SAME value it already is can still make the browser/OS reload
+// the cursor bitmap, which is invisible live but reads as flicker between the
+// custom cursor and its plain CSS fallback (e.g. CURSOR_ORBIT_PAN falls back
+// to "grab", a hand) to screen-recording software that captures the OS cursor
+// layer separately. Cache the last-applied value on the element itself (works
+// across effects/variable names since it's keyed by the actual DOM node) and
+// skip the write when nothing changed.
+const setCursor = (el, value) => {
+  if (!el || el.__lastCursor === value) return;
+  el.__lastCursor = value;
+  el.style.cursor = value;
+};
+
 const makeEmojiCursor = (emoji) => {
   const size = 40;
   try {
@@ -3278,10 +3293,10 @@ const NavCube = ({ threeStateRef, onFaceClick }) => {
         mats[mi].map?.dispose();
         mats[mi].map = makeNavFaceTex(NAV_FACES[mi].s, true, true);  // show label on hover only
         mats[mi].needsUpdate = true;
-        renderer.domElement.style.cursor = 'pointer';
+        setCursor(renderer.domElement, 'pointer');
         setHoveredLabel(NAV_FACES[mi].label);
       } else {
-        renderer.domElement.style.cursor = 'default';
+        setCursor(renderer.domElement, 'default');
         setHoveredLabel(null);
       }
       hoveredMi = mi;
@@ -3400,19 +3415,19 @@ const ViewModeCursor = ({ active }) => {
   const { gl } = useThree();
   useEffect(() => {
     const canvas = gl.domElement;
-    if (!active) { canvas.style.cursor = ''; return undefined; }
+    if (!active) { setCursor(canvas, ''); return undefined; }
     const apply = (e) => {
-      if (e.buttons & 2) { canvas.style.cursor = (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE; return; }
-      if (e.shiftKey || PAN_MOD.active) { canvas.style.cursor = CURSOR_ORBIT_PAN; return; }
-      canvas.style.cursor = CURSOR_ARROW;
+      if (e.buttons & 2) { setCursor(canvas, (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE); return; }
+      if (e.shiftKey || PAN_MOD.active) { setCursor(canvas, CURSOR_ORBIT_PAN); return; }
+      setCursor(canvas, CURSOR_ARROW);
     };
     window.addEventListener('pointermove', apply, { passive: true });
     canvas.addEventListener('pointerenter', apply, { passive: true });
-    canvas.style.cursor = CURSOR_ARROW;
+    setCursor(canvas, CURSOR_ARROW);
     return () => {
       window.removeEventListener('pointermove', apply);
       canvas.removeEventListener('pointerenter', apply);
-      canvas.style.cursor = '';
+      setCursor(canvas, '');
     };
   }, [active, gl]);
   return null;
@@ -3426,7 +3441,7 @@ const CommentsModeCursor = ({ active }) => {
   useEffect(() => {
     const canvas = gl.domElement;
     if (!active) {
-      canvas.style.cursor = '';
+      setCursor(canvas, '');
       return undefined;
     }
 
@@ -3463,18 +3478,18 @@ const CommentsModeCursor = ({ active }) => {
 
     const apply = (e) => {
       // Right-drag = orbit (rotate, or pan with Shift). buttons: 1=left,2=right,4=middle.
-      if (e.buttons & 2) { canvas.style.cursor = (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE; return; }
+      if (e.buttons & 2) { setCursor(canvas, (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE); return; }
       if (!pointerTopIsCanvas(e.clientX, e.clientY)) {
-        canvas.style.cursor = '';
+        setCursor(canvas, '');
         return;
       }
       // Left = place a comment anywhere (surface or empty space) — always the filled cursor.
-      canvas.style.cursor = CURSOR_COMMENT_PLACE;
+      setCursor(canvas, CURSOR_COMMENT_PLACE);
     };
 
     const onDown = (e) => {
       if (e.button === 0 && pointerTopIsCanvas(e.clientX, e.clientY)) {
-        canvas.style.cursor = CURSOR_COMMENT_PLACE;
+        setCursor(canvas, CURSOR_COMMENT_PLACE);
       }
     };
     const onUp = (e) => { apply(e); };
@@ -3482,7 +3497,7 @@ const CommentsModeCursor = ({ active }) => {
     const onLeave = (ev) => {
       if (!active) return;
       if (ev.buttons & (1 | 2)) return;
-      canvas.style.cursor = '';
+      setCursor(canvas, '');
     };
 
     window.addEventListener('pointermove', apply, { passive: true });
@@ -3496,7 +3511,7 @@ const CommentsModeCursor = ({ active }) => {
       window.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointerleave', onLeave);
       canvas.removeEventListener('pointerenter', apply);
-      canvas.style.cursor = '';
+      setCursor(canvas, '');
     };
   }, [active, gl, camera, scene, raycaster]);
 
@@ -4076,11 +4091,11 @@ const RedlineCanvasOverlay = ({ active, redlines, setRedlines, color, width, opa
       if (isDrawing.current) return;        // drawing in progress: leave cursor as-is
       if (orbitLockedRef.current) return;   // orbit in progress: canvas is passthrough
       // Right-drag orbits (handled via handoff → gl cursor); left = pencil.
-      if (e.buttons & 2) { cvs.style.cursor = (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE; return; }
-      cvs.style.cursor = CURSOR_PENCIL_DRAW; // sketch cursor is always filled
+      if (e.buttons & 2) { setCursor(cvs, (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE); return; }
+      setCursor(cvs, CURSOR_PENCIL_DRAW); // sketch cursor is always filled
     };
-    cvs.style.cursor = CURSOR_PENCIL_DRAW; // initial
-    const onLeave = (e) => { if (!(e.buttons & (1 | 2 | 4))) cvs.style.cursor = ''; };
+    setCursor(cvs, CURSOR_PENCIL_DRAW); // initial
+    const onLeave = (e) => { if (!(e.buttons & (1 | 2 | 4))) setCursor(cvs, ''); };
     window.addEventListener('pointermove', updateCursor, { passive: true });
     cvs.addEventListener('pointerleave', onLeave);
     cvs.addEventListener('pointerenter', updateCursor, { passive: true });
@@ -4088,7 +4103,7 @@ const RedlineCanvasOverlay = ({ active, redlines, setRedlines, color, width, opa
       window.removeEventListener('pointermove', updateCursor);
       cvs.removeEventListener('pointerleave', onLeave);
       cvs.removeEventListener('pointerenter', updateCursor);
-      cvs.style.cursor = '';
+      setCursor(cvs, '');
     };
   }, [active, getShoeHit]);
 
@@ -4105,7 +4120,7 @@ const RedlineCanvasOverlay = ({ active, redlines, setRedlines, color, width, opa
       try { cvs.releasePointerCapture(e.pointerId); } catch (_) { /* not captured yet — fine */ }
       const glCanvas = threeStateRef.current?.gl?.domElement;
       // Set cursor on the Three.js canvas — it becomes the hit-target once our overlay is passthrough
-      if (glCanvas) glCanvas.style.cursor = orbitCursor;
+      if (glCanvas) setCursor(glCanvas, orbitCursor);
       if (glCanvas && orbitRef.current) {
         orbitRef.current.enabled = true;
         glCanvas.dispatchEvent(new PointerEvent('pointerdown', {
@@ -4121,7 +4136,7 @@ const RedlineCanvasOverlay = ({ active, redlines, setRedlines, color, width, opa
       const restore = () => {
         orbitLockedRef.current = null;
         const gl = threeStateRef.current?.gl?.domElement;
-        if (gl) gl.style.cursor = '';
+        if (gl) setCursor(gl, '');
         if (canvasRef.current) {
           canvasRef.current.style.pointerEvents = activeRef.current ? 'auto' : 'none';
         }
@@ -4154,7 +4169,7 @@ const RedlineCanvasOverlay = ({ active, redlines, setRedlines, color, width, opa
 
       if (orbitRef.current) orbitRef.current.enabled = false;
       isDrawing.current = true; currentPoints3D.current = []; lastClientPt.current = null;
-      cvs.style.cursor = CURSOR_PENCIL_DRAW;
+      setCursor(cvs, CURSOR_PENCIL_DRAW);
       const mp = modelPositionRef.current;
       const local = { x: hit.x - mp[0], y: hit.y - mp[1], z: hit.z - mp[2] };
       currentPoints3D.current.push(local);
@@ -5849,12 +5864,12 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
         const glCanvas = threeStateRef.current?.gl?.domElement;
         if (glCanvas && orbitRef.current) {
           orbitRef.current.enabled = true;
-          glCanvas.style.cursor = (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE;
+          setCursor(glCanvas, (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE);
           glCanvas.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY, button: e.button, buttons: e.buttons, pointerId: e.pointerId || 1, pointerType: e.pointerType || 'mouse', isPrimary: true }));
         }
         const restore = () => {
           overlay.style.pointerEvents = 'auto';
-          if (glCanvas) glCanvas.style.cursor = '';
+          if (glCanvas) setCursor(glCanvas, '');
           window.removeEventListener('pointerup', restore);
         };
         window.addEventListener('pointerup', restore);
@@ -6079,16 +6094,16 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    if (!active) { overlay.style.cursor = ''; return; }
+    if (!active) { setCursor(overlay, ''); return; }
 
     const ANCHOR_HIT = 14;
     const SEG_HIT = 10;
 
     const updateCursor = (e) => {
       // Direct-select mode: always white arrow, never pen cursors
-      if (directSelect) { overlay.style.cursor = CURSOR_DIRECT_SELECT; return; }
+      if (directSelect) { setCursor(overlay, CURSOR_DIRECT_SELECT); return; }
 
-      if (!e || e.clientX === undefined) { overlay.style.cursor = CURSOR_PEN; return; }
+      if (!e || e.clientX === undefined) { setCursor(overlay, CURSOR_PEN); return; }
       const st = threeStateRef.current;
       const mp = modelPositionRef.current;
       if (st && penAnchors.length > 0) {
@@ -6104,7 +6119,7 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
           if (a.id === lastId) continue;
           const s = proj2d(a.pos3D);
           if (Math.hypot(e.clientX - s.x, e.clientY - s.y) < ANCHOR_HIT) {
-            overlay.style.cursor = CURSOR_PEN_REMOVE;
+            setCursor(overlay, CURSOR_PEN_REMOVE);
             return;
           }
         }
@@ -6116,14 +6131,14 @@ const PenToolOverlay = ({ active, threeStateRef, orbitRef, modelPosition, penAnc
           if (lenSq === 0) continue;
           const t = Math.max(0, Math.min(1, ((e.clientX - sa.x) * dx + (e.clientY - sa.y) * dy) / lenSq));
           if (Math.hypot(sa.x + t * dx - e.clientX, sa.y + t * dy - e.clientY) < SEG_HIT) {
-            overlay.style.cursor = CURSOR_PEN_ADD; return;
+            setCursor(overlay, CURSOR_PEN_ADD); return;
           }
         }
       }
-      overlay.style.cursor = CURSOR_PEN;
+      setCursor(overlay, CURSOR_PEN);
     };
 
-    overlay.style.cursor = directSelect ? CURSOR_DIRECT_SELECT : CURSOR_PEN;
+    setCursor(overlay, directSelect ? CURSOR_DIRECT_SELECT : CURSOR_PEN);
     window.addEventListener('pointermove', updateCursor, { passive: true });
     return () => { window.removeEventListener('pointermove', updateCursor); };
   }, [active, penAnchors, directSelect, threeStateRef]);
@@ -6397,11 +6412,11 @@ const PenModeCursor = ({ active }) => {
   const { gl } = useThree();
   useEffect(() => {
     const canvas = gl.domElement;
-    if (!active) { canvas.style.cursor = ''; return; }
+    if (!active) { setCursor(canvas, ''); return; }
     // PenToolOverlay overlay div shows the pen cursor; leave GL canvas at default
     // so orbit cursor can show correctly when right-click pans are handed off
-    canvas.style.cursor = '';
-    return () => { canvas.style.cursor = ''; };
+    setCursor(canvas, '');
+    return () => { setCursor(canvas, ''); };
   }, [active, gl]);
   return null;
 };
@@ -6421,7 +6436,7 @@ const EmojiToolOverlay = ({ active, threeStateRef, orbitRef, selectedEmoji, onPl
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    overlay.style.cursor = active ? cursorUrl : '';
+    setCursor(overlay, active ? cursorUrl : '');
   }, [active, cursorUrl]);
 
   useEffect(() => {
@@ -6451,10 +6466,10 @@ const EmojiToolOverlay = ({ active, threeStateRef, orbitRef, selectedEmoji, onPl
         overlay.style.pointerEvents = 'none';
         const glCanvas = threeStateRef.current?.gl?.domElement;
         if (glCanvas) {
-          glCanvas.style.cursor = (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE;
+          setCursor(glCanvas, (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE);
           glCanvas.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY, button: e.button, buttons: e.buttons, pointerId: e.pointerId || 1, pointerType: e.pointerType || 'mouse', isPrimary: true }));
         }
-        const restore = () => { overlay.style.pointerEvents = 'auto'; if (glCanvas) glCanvas.style.cursor = ''; window.removeEventListener('pointerup', restore); };
+        const restore = () => { overlay.style.pointerEvents = 'auto'; if (glCanvas) setCursor(glCanvas, ''); window.removeEventListener('pointerup', restore); };
         window.addEventListener('pointerup', restore);
         return;
       }
@@ -6537,7 +6552,7 @@ const TextToolOverlay = ({ active, threeStateRef, orbitRef, onPlace, textFont, t
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    overlay.style.cursor = active ? CURSOR_TEXT : '';
+    setCursor(overlay, active ? CURSOR_TEXT : '');
   }, [active]);
 
   // Clear pending when tool becomes inactive
@@ -6592,10 +6607,10 @@ const TextToolOverlay = ({ active, threeStateRef, orbitRef, onPlace, textFont, t
         overlay.style.pointerEvents = 'none';
         const glCanvas = threeStateRef.current?.gl?.domElement;
         if (glCanvas) {
-          glCanvas.style.cursor = (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE;
+          setCursor(glCanvas, (e.shiftKey || PAN_MOD.active) ? CURSOR_ORBIT_PAN : CURSOR_ORBIT_ROTATE);
           glCanvas.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY, button: e.button, buttons: e.buttons, pointerId: e.pointerId || 1, pointerType: e.pointerType || 'mouse', isPrimary: true }));
         }
-        const restore = () => { overlay.style.pointerEvents = 'auto'; if (glCanvas) glCanvas.style.cursor = ''; window.removeEventListener('pointerup', restore); };
+        const restore = () => { overlay.style.pointerEvents = 'auto'; if (glCanvas) setCursor(glCanvas, ''); window.removeEventListener('pointerup', restore); };
         window.addEventListener('pointerup', restore);
         return;
       }
@@ -8280,7 +8295,7 @@ export default function App() {
       }
       // Immediate cursor feedback on key press (don't wait for a pointermove).
       const cvs = threeStateRef.current?.gl?.domElement;
-      if (cvs) cvs.style.cursor = held ? CURSOR_ORBIT_PAN : '';
+      if (cvs) setCursor(cvs, held ? CURSOR_ORBIT_PAN : '');
     };
     const isTyping = () => {
       const el = document.activeElement; const tag = el?.tagName?.toLowerCase();
